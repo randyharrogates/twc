@@ -96,7 +96,13 @@ export function ExpenseList({ group, onOpenLLM }: Props) {
       )}
 
       {open && (
-        <ExpenseDialog group={group} expense={editing} open={open} onClose={() => setOpen(false)} />
+        <ExpenseDialog
+          key={editing?.id ?? 'new'}
+          group={group}
+          expense={editing}
+          open={open}
+          onClose={() => setOpen(false)}
+        />
       )}
     </section>
   );

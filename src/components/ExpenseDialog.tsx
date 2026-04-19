@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CurrencyCode, Expense, Group, SplitEntry, SplitMode } from '../types';
 import { useAppStore, type ExpenseInput } from '../state/store';
 import {
@@ -10,6 +10,7 @@ import {
   convertMinor,
 } from '../lib/currency';
 import { validateAmountMinor, validateRate, validateSplit } from '../lib/validation';
+import type { ExpenseDraft } from '../lib/llm/types';
 import { Button } from './ui/Button';
 import { Dialog } from './ui/Dialog';
 import { Input } from './ui/Input';
@@ -20,61 +21,101 @@ import { SplitEditor } from './SplitEditor';
 interface Props {
   group: Group;
   expense: Expense | null;
+  initialDraft?: ExpenseDraft;
   open: boolean;
   onClose: () => void;
+  onSaved?: () => void;
+}
+
+interface FormState {
+  description: string;
+  amountRaw: string;
+  currency: CurrencyCode;
+  rateRaw: string;
+  payerId: string;
+  mode: SplitMode;
+  split: SplitEntry[];
 }
 
 function defaultSplit(group: Group): SplitEntry[] {
   return group.members.map((m) => ({ memberId: m.id, value: 1 }));
 }
 
-export function ExpenseDialog({ group, expense, open, onClose }: Props) {
+function amountToRaw(amountMinor: number, currency: CurrencyCode): string {
+  const dec = minorDecimals(currency);
+  if (amountMinor === 0) return '';
+  return dec === 0 ? String(amountMinor) : (amountMinor / 10 ** dec).toFixed(dec);
+}
+
+function initialFormState(
+  group: Group,
+  expense: Expense | null,
+  initialDraft?: ExpenseDraft,
+): FormState {
+  if (expense) {
+    const byId = new Map(expense.split.map((s) => [s.memberId, s]));
+    return {
+      description: expense.description,
+      amountRaw: amountToRaw(expense.amountMinor, expense.currency),
+      currency: expense.currency,
+      rateRaw: expense.currency === group.baseCurrency ? '' : String(expense.rateToBase),
+      payerId: expense.payerId,
+      mode: expense.splitMode,
+      split: group.members.map((m) => byId.get(m.id) ?? { memberId: m.id, value: 0 }),
+    };
+  }
+  if (initialDraft) {
+    const byId = new Map(initialDraft.split.map((s) => [s.memberId, s]));
+    return {
+      description: initialDraft.description,
+      amountRaw: amountToRaw(initialDraft.amountMinor, initialDraft.currency),
+      currency: initialDraft.currency,
+      rateRaw:
+        initialDraft.currency === group.baseCurrency ? '' : String(initialDraft.rateToBase),
+      payerId: initialDraft.payerId,
+      mode: initialDraft.splitMode,
+      split: group.members.map((m) => byId.get(m.id) ?? { memberId: m.id, value: 0 }),
+    };
+  }
+  return {
+    description: '',
+    amountRaw: '',
+    currency: group.baseCurrency,
+    rateRaw: '',
+    payerId: group.members[0]?.id ?? '',
+    mode: 'even',
+    split: defaultSplit(group),
+  };
+}
+
+export function ExpenseDialog({ group, expense, initialDraft, open, onClose, onSaved }: Props) {
   const addExpense = useAppStore((s) => s.addExpense);
   const updateExpense = useAppStore((s) => s.updateExpense);
 
-  const [description, setDescription] = useState('');
-  const [amountRaw, setAmountRaw] = useState('');
-  const [currency, setCurrency] = useState<CurrencyCode>(group.baseCurrency);
-  const [rateRaw, setRateRaw] = useState('');
-  const [payerId, setPayerId] = useState<string>(group.members[0]?.id ?? '');
-  const [mode, setMode] = useState<SplitMode>('even');
-  const [split, setSplit] = useState<SplitEntry[]>(defaultSplit(group));
+  const initial = useMemo(
+    () => initialFormState(group, expense, initialDraft),
+    [group, expense, initialDraft],
+  );
+
+  const [description, setDescription] = useState(initial.description);
+  const [amountRaw, setAmountRaw] = useState(initial.amountRaw);
+  const [currency, setCurrency] = useState<CurrencyCode>(initial.currency);
+  const [rateRaw, setRateRaw] = useState(initial.rateRaw);
+  const [payerId, setPayerId] = useState<string>(initial.payerId);
+  const [mode, setMode] = useState<SplitMode>(initial.mode);
+  const [split, setSplit] = useState<SplitEntry[]>(initial.split);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    if (expense) {
-      setDescription(expense.description);
-      const dec = minorDecimals(expense.currency);
-      setAmountRaw(dec === 0 ? String(expense.amountMinor) : (expense.amountMinor / 10 ** dec).toFixed(dec));
-      setCurrency(expense.currency);
-      setRateRaw(expense.currency === group.baseCurrency ? '' : String(expense.rateToBase));
-      setPayerId(expense.payerId);
-      setMode(expense.splitMode);
-      // Merge current group members with existing split; new members default to non-participating.
-      const byId = new Map(expense.split.map((s) => [s.memberId, s]));
-      setSplit(group.members.map((m) => byId.get(m.id) ?? { memberId: m.id, value: 0 }));
+  const handleCurrencyChange = (next: CurrencyCode) => {
+    setCurrency(next);
+    if (next === group.baseCurrency) {
+      setRateRaw('');
     } else {
-      setDescription('');
-      setAmountRaw('');
-      setCurrency(group.baseCurrency);
-      setRateRaw('');
-      setPayerId(group.members[0]?.id ?? '');
-      setMode('even');
-      setSplit(defaultSplit(group));
-    }
-    setError(null);
-  }, [open, expense, group]);
-
-  // Pre-fill rate from rateHints when currency changes.
-  useEffect(() => {
-    if (currency === group.baseCurrency) {
-      setRateRaw('');
-    } else if (!expense || expense.currency !== currency) {
-      const hint = group.rateHints[currency];
+      const hint = group.rateHints[next];
       if (hint !== undefined) setRateRaw(String(hint));
+      else setRateRaw('');
     }
-  }, [currency, group, expense]);
+  };
 
   const amountMinor = useMemo(() => parseAmountToMinor(amountRaw, currency) ?? 0, [amountRaw, currency]);
   const rate = useMemo(() => (currency === group.baseCurrency ? 1 : Number(rateRaw)), [rateRaw, currency, group]);
@@ -104,6 +145,7 @@ export function ExpenseDialog({ group, expense, open, onClose }: Props) {
     };
     if (expense) updateExpense(group.id, expense.id, input);
     else addExpense(group.id, input);
+    onSaved?.();
     onClose();
   };
 
@@ -139,7 +181,7 @@ export function ExpenseDialog({ group, expense, open, onClose }: Props) {
             <Select
               id="exp-cur"
               value={currency}
-              onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+              onChange={(e) => handleCurrencyChange(e.target.value as CurrencyCode)}
             >
               {CURRENCY_CODES.map((c) => (
                 <option key={c} value={c}>

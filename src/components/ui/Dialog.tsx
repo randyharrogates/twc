@@ -33,23 +33,25 @@ export function Dialog({ open, title, onClose, children, widthClass = 'max-w-lg'
   return (
     <dialog
       ref={ref}
-      className={`w-full ${widthClass} rounded-2xl border border-ink-300 bg-ink-100 p-0 text-ink-700 shadow-2xl open:animate-[dialog-in_200ms_ease-out]`}
+      className={`m-auto max-h-[90vh] w-[95vw] ${widthClass} overflow-hidden rounded-2xl border border-ink-300 bg-ink-100 p-0 text-ink-700 shadow-2xl open:animate-[dialog-in_200ms_ease-out]`}
       onClick={(e) => {
         if (e.target === ref.current) onClose();
       }}
     >
-      <div className="flex items-center justify-between border-b border-ink-200/60 px-5 py-4">
-        <h2 className="font-display text-lg tracking-wide text-ink-800">{title}</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-full p-1 text-ink-500 hover:bg-ink-200 hover:text-ink-800"
-          aria-label="Close"
-        >
-          ×
-        </button>
+      <div className="flex max-h-[90vh] flex-col">
+        <div className="flex items-center justify-between border-b border-ink-200/60 px-5 py-4">
+          <h2 className="font-display text-lg tracking-wide text-ink-800">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-ink-500 hover:bg-ink-200 hover:text-ink-800"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
       </div>
-      <div className="p-5">{children}</div>
       <style>{`
         @keyframes dialog-in {
           from { opacity: 0; transform: scale(0.97); }

@@ -1,4 +1,5 @@
 import { useActiveSection } from '../hooks/useActiveSection';
+import { Gear } from './ui/icons';
 
 const SECTIONS = [
   { id: 'home', label: 'HOME' },
@@ -7,7 +8,11 @@ const SECTIONS = [
   { id: 'settlement', label: 'SETTLEMENT' },
 ];
 
-export function Nav() {
+interface NavProps {
+  onOpenSettings: () => void;
+}
+
+export function Nav({ onOpenSettings }: NavProps) {
   const active = useActiveSection(SECTIONS.map((s) => s.id));
 
   const scrollTo = (id: string) => {
@@ -24,23 +29,33 @@ export function Nav() {
           TWC
           <span className="ml-1 text-accent-400">.</span>
         </button>
-        <ul className="hidden gap-8 md:flex">
-          {SECTIONS.map((s) => (
-            <li key={s.id}>
-              <button
-                onClick={() => scrollTo(s.id)}
-                className={`relative font-display text-sm tracking-widest transition-colors ${
-                  active === s.id ? 'text-accent-400' : 'text-ink-600 hover:text-ink-800'
-                }`}
-              >
-                {s.label}
-                {active === s.id && (
-                  <span className="absolute -bottom-1 left-0 right-0 h-[2px] bg-accent-400" />
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="flex items-center gap-6">
+          <ul className="hidden gap-8 md:flex">
+            {SECTIONS.map((s) => (
+              <li key={s.id}>
+                <button
+                  onClick={() => scrollTo(s.id)}
+                  className={`relative font-display text-sm tracking-widest transition-colors ${
+                    active === s.id ? 'text-accent-400' : 'text-ink-600 hover:text-ink-800'
+                  }`}
+                >
+                  {s.label}
+                  {active === s.id && (
+                    <span className="absolute -bottom-1 left-0 right-0 h-[2px] bg-accent-400" />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Open settings"
+            className="rounded-full p-1.5 text-ink-600 hover:bg-ink-200 hover:text-ink-800"
+          >
+            <Gear className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </nav>
   );

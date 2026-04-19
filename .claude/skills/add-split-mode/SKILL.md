@@ -15,7 +15,6 @@ A split mode is how an expense's total is divided among selected participants. E
 4. **`src/components/SplitEditor.tsx`** — add a branch that renders the right inputs per member (checkbox / number input / currency input) and shows live validation feedback.
 5. **`src/test/splits.test.ts`** — add tests: a normal case, a rounding-remainder edge case, a payer-not-in-split case. Assert exact values.
 6. **`src/test/settlement.test.ts`** — add at least one assembled-expense test that exercises the new mode through to a final settlement.
-7. **`src/lib/llm/mockClient.ts`** — if the new mode has a natural-language trigger worth handling, add a pattern; otherwise note it explicitly in `parseError` messaging.
 
 ## Verification
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useShallow } from 'zustand/react/shallow';
 import type {
   CurrencyCode,
   Expense,
@@ -8,6 +9,26 @@ import type {
   SplitMode,
 } from '../types';
 import { newId } from '../lib/id';
+import type {
+  ChatMessage,
+  ContentBlock,
+  ExpenseDraft,
+  ModelId,
+  ReasoningEffort,
+  TokenUsage,
+} from '../lib/llm/types';
+import { dayKey, monthKey, usageToMicroUsd } from '../lib/llm/cost';
+import { getModel } from '../lib/llm/models';
+import { DEFAULT_POLICY, type Policy, type Provider } from '../lib/policy';
+import {
+  DEFAULT_LIMITS,
+  checkAndConsume,
+  initialRateLimiterState,
+  type ConsumeResult,
+  type RateLimiterState,
+  type RateLimits,
+} from '../lib/rateLimiter';
+import { clearImageCache, forgetImage } from './imageCache';
 
 export interface ExpenseInput {
   description: string;
@@ -19,10 +40,44 @@ export interface ExpenseInput {
   split: SplitEntry[];
 }
 
+export interface Settings {
+  llmProvider: 'anthropic' | 'openai';
+  apiKeys: { anthropic?: string; openai?: string };
+  modelOverride: ModelId | null;
+  reasoningEffort: ReasoningEffort;
+  planMode: boolean;
+  rateLimiter: RateLimiterState;
+  rateLimits: RateLimits;
+  retryConfig: { maxRetries: number; baseDelayMs: number };
+}
+
+export interface Conversation {
+  messages: ChatMessage[];
+  updatedAt: number;
+  injectionBannerDismissed: boolean;
+}
+
+export interface CostTracker {
+  dailyUsdMicros: Record<string, number>;
+  monthlyUsdMicros: Record<string, number>;
+  perMessage: Array<{
+    messageId: string;
+    usdMicros: number;
+    tokens: TokenUsage;
+    model: ModelId;
+    at: number;
+  }>;
+}
+
 export interface AppState {
   groups: Record<string, Group>;
   groupOrder: string[];
   activeGroupId: string | null;
+
+  settings: Settings;
+  conversations: Record<string, Conversation>;
+  policy: Policy;
+  costTracker: CostTracker;
 
   createGroup: (name: string, baseCurrency: CurrencyCode) => string;
   renameGroup: (groupId: string, name: string) => void;
@@ -38,25 +93,102 @@ export interface AppState {
   renameMember: (groupId: string, memberId: string, name: string) => void;
   deleteMember: (groupId: string, memberId: string) => void;
 
+  setRateHint: (groupId: string, code: CurrencyCode, rate: number) => void;
+
   addExpense: (groupId: string, input: ExpenseInput) => string;
   updateExpense: (groupId: string, expenseId: string, input: ExpenseInput) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
+
+  setLLMProvider: (provider: 'anthropic' | 'openai') => void;
+  setApiKey: (provider: 'anthropic' | 'openai', key: string) => void;
+  clearApiKey: (provider: 'anthropic' | 'openai') => void;
+  setModelOverride: (id: ModelId | null) => void;
+  setReasoningEffort: (effort: ReasoningEffort) => void;
+  setPlanMode: (v: boolean) => void;
+  setRetryConfig: (cfg: { maxRetries: number; baseDelayMs: number }) => void;
+  setRateLimits: (limits: RateLimits) => void;
+  consumeRateToken: (nowMs: number) => ConsumeResult;
+
+  appendMessage: (groupId: string, msg: ChatMessage) => void;
+  acceptDrafts: (groupId: string, messageId: string, draftIndexes: number[]) => string[];
+  discardDrafts: (groupId: string, messageId: string) => void;
+  clearConversation: (groupId: string) => void;
+  dismissInjectionBanner: (groupId: string) => void;
+
+  setAllowedProviders: (providers: Provider[]) => void;
+  setDailyCap: (micros: number) => void;
+  setMonthlyCap: (micros: number) => void;
+  grantImageConsent: (provider: Provider) => void;
+  setPersistHistory: (v: boolean) => void;
+  resetPolicy: () => void;
+
+  recordCost: (messageId: string, usage: TokenUsage, model: ModelId, nowMs: number) => number;
 
   resetAll: () => void;
   importState: (json: string) => void;
   exportState: () => string;
 }
 
+function defaultSettings(): Settings {
+  return {
+    llmProvider: 'openai',
+    apiKeys: {},
+    modelOverride: null,
+    reasoningEffort: 'minimal',
+    planMode: false,
+    rateLimiter: initialRateLimiterState(DEFAULT_LIMITS, 0),
+    rateLimits: DEFAULT_LIMITS,
+    retryConfig: { maxRetries: 3, baseDelayMs: 500 },
+  };
+}
+
+function defaultCostTracker(): CostTracker {
+  return { dailyUsdMicros: {}, monthlyUsdMicros: {}, perMessage: [] };
+}
+
+function emptyConversation(): Conversation {
+  return { messages: [], updatedAt: 0, injectionBannerDismissed: false };
+}
+
+const EMPTY_CONVERSATION: Conversation = Object.freeze({
+  messages: [] as ChatMessage[],
+  updatedAt: 0,
+  injectionBannerDismissed: false,
+}) as Conversation;
+
 const initialState = {
   groups: {} as Record<string, Group>,
   groupOrder: [] as string[],
   activeGroupId: null as string | null,
+  settings: defaultSettings(),
+  conversations: {} as Record<string, Conversation>,
+  policy: DEFAULT_POLICY,
+  costTracker: defaultCostTracker(),
 };
 
 function memberReferenceCount(group: Group, memberId: string): number {
   return group.expenses.filter(
     (e) => e.payerId === memberId || e.split.some((s) => s.memberId === memberId),
   ).length;
+}
+
+function redactKeys(settings: Settings): Settings {
+  return { ...settings, apiKeys: { anthropic: '', openai: '' } };
+}
+
+function collectImageIds(conversation: Conversation | undefined): string[] {
+  if (!conversation) return [];
+  const ids: string[] = [];
+  for (const m of conversation.messages) {
+    for (const b of m.blocks) {
+      if (b.type === 'image') ids.push(m.id);
+    }
+  }
+  return ids;
+}
+
+function strippedBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  return blocks.map((b) => (b.type === 'image' ? { ...b, base64: '' } : b));
 }
 
 export const useAppStore = create<AppState>()(
@@ -92,19 +224,31 @@ export const useAppStore = create<AppState>()(
       },
 
       deleteGroup: (groupId) => {
+        const conv = get().conversations[groupId];
+        const imageIds = collectImageIds(conv);
+        for (const id of imageIds) forgetImage(id);
+        const deletedMessageIds = new Set<string>(conv ? conv.messages.map((m) => m.id) : []);
         set((s) => {
           if (!s.groups[groupId]) return s;
-          const { [groupId]: _removed, ...rest } = s.groups;
+          const { [groupId]: _g, ...rest } = s.groups;
+          const { [groupId]: _c, ...restConversations } = s.conversations;
           const order = s.groupOrder.filter((id) => id !== groupId);
           const activeGroupId =
             s.activeGroupId === groupId ? order[0] ?? null : s.activeGroupId;
-          return { groups: rest, groupOrder: order, activeGroupId };
+          const perMessage = deletedMessageIds.size
+            ? s.costTracker.perMessage.filter((c) => !deletedMessageIds.has(c.messageId))
+            : s.costTracker.perMessage;
+          return {
+            groups: rest,
+            conversations: restConversations,
+            groupOrder: order,
+            activeGroupId,
+            costTracker: { ...s.costTracker, perMessage },
+          };
         });
       },
 
-      setActiveGroup: (groupId) => {
-        set({ activeGroupId: groupId });
-      },
+      setActiveGroup: (groupId) => set({ activeGroupId: groupId }),
 
       changeBaseCurrency: (groupId, newBase, newRates) => {
         const group = get().groups[groupId];
@@ -120,12 +264,7 @@ export const useAppStore = create<AppState>()(
         set((s) => ({
           groups: {
             ...s.groups,
-            [groupId]: {
-              ...group,
-              baseCurrency: newBase,
-              expenses: updatedExpenses,
-              rateHints: {},
-            },
+            [groupId]: { ...group, baseCurrency: newBase, expenses: updatedExpenses, rateHints: {} },
           },
         }));
       },
@@ -155,10 +294,22 @@ export const useAppStore = create<AppState>()(
             ...s.groups,
             [groupId]: {
               ...group,
-              members: group.members.map((m) =>
-                m.id === memberId ? { ...m, name: trimmed } : m,
-              ),
+              members: group.members.map((m) => (m.id === memberId ? { ...m, name: trimmed } : m)),
             },
+          },
+        }));
+      },
+
+      setRateHint: (groupId, code, rate) => {
+        if (!Number.isFinite(rate) || rate <= 0) {
+          throw new Error(`Rate must be a positive number; got ${rate}.`);
+        }
+        const group = get().groups[groupId];
+        if (!group) throw new Error(`Unknown groupId: ${groupId}`);
+        set((s) => ({
+          groups: {
+            ...s.groups,
+            [groupId]: { ...group, rateHints: { ...group.rateHints, [code]: rate } },
           },
         }));
       },
@@ -232,42 +383,325 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      resetAll: () => {
-        set(initialState);
+      setLLMProvider: (provider) =>
+        set((s) => ({ settings: { ...s.settings, llmProvider: provider } })),
+
+      setApiKey: (provider, key) =>
+        set((s) => ({
+          settings: { ...s.settings, apiKeys: { ...s.settings.apiKeys, [provider]: key } },
+        })),
+
+      clearApiKey: (provider) =>
+        set((s) => {
+          const next = { ...s.settings.apiKeys };
+          delete next[provider];
+          return { settings: { ...s.settings, apiKeys: next } };
+        }),
+
+      setModelOverride: (id) =>
+        set((s) => ({ settings: { ...s.settings, modelOverride: id } })),
+
+      setReasoningEffort: (effort) =>
+        set((s) => ({ settings: { ...s.settings, reasoningEffort: effort } })),
+
+      setPlanMode: (v) => set((s) => ({ settings: { ...s.settings, planMode: v } })),
+
+      setRetryConfig: (cfg) =>
+        set((s) => ({ settings: { ...s.settings, retryConfig: cfg } })),
+
+      setRateLimits: (limits) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            rateLimits: limits,
+            rateLimiter: initialRateLimiterState(limits, 0),
+          },
+        })),
+
+      consumeRateToken: (nowMs) => {
+        const { settings } = get();
+        const result = checkAndConsume(settings.rateLimiter, nowMs, settings.rateLimits);
+        set((s) => ({
+          settings: { ...s.settings, rateLimiter: result.next },
+        }));
+        return result;
       },
 
-      importState: (json) => {
-        const parsed = JSON.parse(json) as Pick<
-          AppState,
-          'groups' | 'groupOrder' | 'activeGroupId'
-        >;
-        if (!parsed || typeof parsed !== 'object') {
-          throw new Error('Invalid state file.');
-        }
-        set({
-          groups: parsed.groups ?? {},
-          groupOrder: parsed.groupOrder ?? [],
-          activeGroupId: parsed.activeGroupId ?? null,
+      appendMessage: (groupId, msg) => {
+        set((s) => {
+          const existing = s.conversations[groupId] ?? emptyConversation();
+          const stripped: ChatMessage = { ...msg, blocks: strippedBlocks(msg.blocks) };
+          return {
+            conversations: {
+              ...s.conversations,
+              [groupId]: {
+                ...existing,
+                messages: [...existing.messages, stripped],
+                updatedAt: msg.createdAt,
+              },
+            },
+          };
         });
       },
 
+      acceptDrafts: (groupId, messageId, draftIndexes) => {
+        const s = get();
+        const conv = s.conversations[groupId];
+        const group = s.groups[groupId];
+        if (!conv || !group) return [];
+        const msg = conv.messages.find((m) => m.id === messageId);
+        if (!msg || !msg.drafts) return [];
+        const ids: string[] = [];
+        for (const i of draftIndexes) {
+          const d = msg.drafts[i];
+          if (!d) continue;
+          const id = get().addExpense(groupId, draftToExpenseInput(d));
+          ids.push(id);
+        }
+        return ids;
+      },
+
+      discardDrafts: (groupId, messageId) => {
+        set((s) => {
+          const conv = s.conversations[groupId];
+          if (!conv) return s;
+          return {
+            conversations: {
+              ...s.conversations,
+              [groupId]: {
+                ...conv,
+                messages: conv.messages.map((m) =>
+                  m.id === messageId ? { ...m, drafts: [] } : m,
+                ),
+              },
+            },
+          };
+        });
+      },
+
+      clearConversation: (groupId) => {
+        const ids = collectImageIds(get().conversations[groupId]);
+        for (const id of ids) forgetImage(id);
+        set((s) => {
+          if (!s.conversations[groupId]) return s;
+          return {
+            conversations: {
+              ...s.conversations,
+              [groupId]: emptyConversation(),
+            },
+          };
+        });
+      },
+
+      dismissInjectionBanner: (groupId) => {
+        set((s) => {
+          const conv = s.conversations[groupId] ?? emptyConversation();
+          return {
+            conversations: {
+              ...s.conversations,
+              [groupId]: { ...conv, injectionBannerDismissed: true },
+            },
+          };
+        });
+      },
+
+      setAllowedProviders: (providers) =>
+        set((s) => ({ policy: { ...s.policy, allowedProviders: providers } })),
+
+      setDailyCap: (micros) =>
+        set((s) => ({ policy: { ...s.policy, dailyCapUsdMicros: Math.max(0, Math.floor(micros)) } })),
+
+      setMonthlyCap: (micros) =>
+        set((s) => ({ policy: { ...s.policy, monthlyCapUsdMicros: Math.max(0, Math.floor(micros)) } })),
+
+      grantImageConsent: (provider) =>
+        set((s) => ({
+          policy: {
+            ...s.policy,
+            imageConsentByProvider: { ...s.policy.imageConsentByProvider, [provider]: true },
+          },
+        })),
+
+      setPersistHistory: (v) => set((s) => ({ policy: { ...s.policy, persistHistory: v } })),
+
+      resetPolicy: () => set({ policy: DEFAULT_POLICY }),
+
+      recordCost: (messageId, usage, model, nowMs) => {
+        const micros = usageToMicroUsd(usage, getModel(model));
+        const dk = dayKey(nowMs);
+        const mk = monthKey(nowMs);
+        set((s) => ({
+          costTracker: {
+            dailyUsdMicros: { ...s.costTracker.dailyUsdMicros, [dk]: (s.costTracker.dailyUsdMicros[dk] ?? 0) + micros },
+            monthlyUsdMicros: { ...s.costTracker.monthlyUsdMicros, [mk]: (s.costTracker.monthlyUsdMicros[mk] ?? 0) + micros },
+            perMessage: [
+              ...s.costTracker.perMessage,
+              { messageId, usdMicros: micros, tokens: usage, model, at: nowMs },
+            ],
+          },
+        }));
+        return micros;
+      },
+
+      resetAll: () => {
+        clearImageCache();
+        set({
+          groups: {},
+          groupOrder: [],
+          activeGroupId: null,
+          conversations: {},
+          costTracker: defaultCostTracker(),
+          policy: DEFAULT_POLICY,
+          settings: defaultSettings(),
+        });
+      },
+
+      importState: (json) => {
+        const parsed = JSON.parse(json) as Partial<AppState>;
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Invalid state file.');
+        }
+        set((s) => ({
+          groups: parsed.groups ?? {},
+          groupOrder: parsed.groupOrder ?? [],
+          activeGroupId: parsed.activeGroupId ?? null,
+          conversations: parsed.conversations ?? {},
+          policy: parsed.policy ?? s.policy,
+          costTracker: parsed.costTracker ?? s.costTracker,
+          settings: parsed.settings ? { ...s.settings, ...redactKeys(parsed.settings as Settings) } : s.settings,
+        }));
+      },
+
       exportState: () => {
-        const { groups, groupOrder, activeGroupId } = get();
-        return JSON.stringify({ groups, groupOrder, activeGroupId }, null, 2);
+        const { groups, groupOrder, activeGroupId, conversations, policy, costTracker, settings } = get();
+        return JSON.stringify(
+          {
+            groups,
+            groupOrder,
+            activeGroupId,
+            conversations,
+            policy,
+            costTracker,
+            settings: redactKeys(settings),
+          },
+          null,
+          2,
+        );
       },
     }),
     {
       name: 'twc-v1',
-      version: 1,
+      version: 6,
       partialize: (s) => ({
         groups: s.groups,
         groupOrder: s.groupOrder,
         activeGroupId: s.activeGroupId,
+        settings: s.settings,
+        conversations: s.policy.persistHistory ? s.conversations : {},
+        policy: s.policy,
+        costTracker: s.costTracker,
       }),
+      migrate: (persisted, fromVersion) => {
+        const base = persisted as Partial<AppState> | null;
+        if (!base) return { ...initialState };
+        const withV2 = (state: Partial<AppState>): Partial<AppState> => {
+          const settings = state.settings as Settings | undefined;
+          const provider = settings?.llmProvider;
+          if (provider === 'anthropic' || provider === 'openai') return state;
+          return {
+            ...state,
+            settings: {
+              ...(settings ?? defaultSettings()),
+              llmProvider: 'openai',
+            } as Settings,
+          };
+        };
+        const withV4 = (state: Partial<AppState>): Partial<AppState> => {
+          const settings = state.settings as Partial<Settings> | undefined;
+          if (settings && typeof settings.reasoningEffort === 'string') return state;
+          return {
+            ...state,
+            settings: {
+              ...defaultSettings(),
+              ...(settings ?? {}),
+              reasoningEffort: 'minimal',
+            } as Settings,
+          };
+        };
+        const withV5 = (state: Partial<AppState>): Partial<AppState> => {
+          const settings = state.settings as Partial<Settings> | undefined;
+          if (settings && typeof settings.planMode === 'boolean') return state;
+          return {
+            ...state,
+            settings: {
+              ...defaultSettings(),
+              ...(settings ?? {}),
+              planMode: false,
+            } as Settings,
+          };
+        };
+        // v6 adds optional elapsedMs / sentInPlanMode on ChatMessage — additive, no transform.
+        if (fromVersion >= 6) return base as AppState;
+        if (fromVersion >= 5) return base as AppState;
+        if (fromVersion >= 4) return withV5(base) as AppState;
+        if (fromVersion >= 3) return withV5(withV4(base)) as AppState;
+        if (fromVersion >= 2) return withV5(withV4(withV2(base))) as AppState;
+        return withV5(
+          withV4(
+            withV2({
+              ...base,
+              groups: base.groups ?? {},
+              groupOrder: base.groupOrder ?? [],
+              activeGroupId: base.activeGroupId ?? null,
+              settings: defaultSettings(),
+              conversations: {},
+              policy: DEFAULT_POLICY,
+              costTracker: defaultCostTracker(),
+            }),
+          ),
+        ) as AppState;
+      },
     },
   ),
 );
 
+function draftToExpenseInput(d: ExpenseDraft): ExpenseInput {
+  return {
+    description: d.description,
+    amountMinor: d.amountMinor,
+    currency: d.currency,
+    rateToBase: d.rateToBase,
+    payerId: d.payerId,
+    splitMode: d.splitMode,
+    split: d.split,
+  };
+}
+
 export function useActiveGroup(): Group | null {
   return useAppStore((s) => (s.activeGroupId ? s.groups[s.activeGroupId] ?? null : null));
+}
+
+export function useActiveConversation(groupId: string | null): Conversation {
+  return useAppStore(
+    useShallow((s) =>
+      groupId && s.conversations[groupId] ? s.conversations[groupId] : EMPTY_CONVERSATION,
+    ),
+  );
+}
+
+export function useSettings(): Settings {
+  return useAppStore(useShallow((s) => s.settings));
+}
+
+export function usePolicy(): Policy {
+  return useAppStore(useShallow((s) => s.policy));
+}
+
+export function useCostTracker(): CostTracker {
+  return useAppStore(useShallow((s) => s.costTracker));
+}
+
+export function useCostTodayMicros(nowMs: number): number {
+  const k = dayKey(nowMs);
+  return useAppStore((s) => s.costTracker.dailyUsdMicros[k] ?? 0);
 }
