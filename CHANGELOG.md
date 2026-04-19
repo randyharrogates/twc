@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **(docs)** Rewrite `README.md` to interactive production grade: centered header with inline favicon, shields.io badges (Pages deploy, last-commit, Node/Vite/React/Tailwind, license), live-demo CTA, anchored TOC, mermaid architecture diagram of the agentic loop, feature tables for the four split modes, nine currencies, two LLM providers, and seven safety rails, collapsible `<details>` quick-start + prerequisites + provider-key flows, chat-assistant deep-dive (slash commands, plan mode, tool registry, phase labels), directory-layout tree, deployment / contributing / license sections.
 - **(docs)** Add `<meta name="description">` to `index.html` so live-demo link previews and search indexing have a one-line summary.
 - **(build)** Bump `package.json` version to `0.1.0` to match the existing CHANGELOG entry (was stale at `0.0.0`).
+- **(docs)** Add MIT license: new `LICENSE` file at repo root (MIT Expat text, © 2026 Randy Chan), `"license": "MIT"` field in `package.json`, and README badge + License section swapped from the "All rights reserved" stub to a wired MIT badge linking to `LICENSE`.
 
 ### Removed
 

@@ -7,3 +7,4 @@ dist
 !.env.example
 .vite
 coverage
+claw-code/

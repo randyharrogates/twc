@@ -8,7 +8,7 @@
 
 [![Pages deploy](https://img.shields.io/github/deployments/randyharrogates/twc/github-pages?label=pages&logo=github)](https://randyharrogates.github.io/twc/)
 [![Last commit](https://img.shields.io/github/last-commit/randyharrogates/twc?logo=git&logoColor=white)](https://github.com/randyharrogates/twc/commits/main)
-[![License](https://img.shields.io/badge/license-All%20rights%20reserved-lightgrey)](#license)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
 [![Vite 8](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vitejs.dev)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
@@ -32,6 +32,7 @@
 - [Development](#development)
 - [Deployment](#deployment)
 - [Contributing](#contributing)
+- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 ---
@@ -413,7 +414,18 @@ bring their own keys at runtime.
 
 ---
 
+## Acknowledgments
+
+TWC's agent runtime is heavily inspired by
+[**claw-code**](https://github.com/ultraworkers/claw-code) — its `ConversationRuntime`
+and turn-loop semantics shaped the `AgentClient` interface, the `runTurn` driver, the
+32-iteration iteration cap, and the preference for direct `fetch` over vendor SDKs in
+`anthropicClient.ts` / `openaiClient.ts`. Where claw-code's Rust/CLI patterns didn't
+fit TWC's browser-only, frontend-only constraints, the adaptation is called out in
+design notes; otherwise the patterns are reused as-is.
+
+---
+
 ## License
 
-**All rights reserved** — no license granted. TBD; a future commit may add a formal
-open-source license (MIT / Apache-2.0) once the author decides.
+[MIT](LICENSE) © 2026 Randy Chan. See the [`LICENSE`](LICENSE) file for the full text.
