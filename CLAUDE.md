@@ -1,6 +1,6 @@
 # twc
 
-Frontend-only Splitwise-style expense splitter. Groups of people log who paid for what,
+Frontend-only group-expense splitter. Groups of people log who paid for what,
 assign per-item participants and a split rule, and see a minimal "who owes whom"
 settlement. A multimodal chat assistant (Anthropic + OpenAI, pluggable via the
 `AgentClient` interface) parses receipt photos and free-form notes into draft expenses that
@@ -22,8 +22,8 @@ supports an opt-in session-scoped passphrase vault that encrypts
 `KeyVault`'s private memory for the session; the passphrase itself is **never
 persisted** — only the salt, iteration count, and an encrypted probe (stored on
 `settings.vault`) so `unlock(passphrase)` can verify a candidate. Ciphertext is a
-tagged string: `enc.v1.<iv>.<ct>`. The pattern is ported from
-`/Users/randychan/git/Leeseidon/src/lib/storage/` (PBKDF2-SHA256 + AES-GCM). Files:
+tagged string: `enc.v1.<iv>.<ct>`. The pattern uses the same PBKDF2-SHA256 + AES-GCM
+parameters as a prior project. Files:
 [`src/lib/crypto.ts`](src/lib/crypto.ts), [`src/lib/keyVault.ts`](src/lib/keyVault.ts),
 [`src/components/SecurityPanel.tsx`](src/components/SecurityPanel.tsx),
 [`src/components/UnlockDialog.tsx`](src/components/UnlockDialog.tsx).

@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="./public/favicon.svg" width="48" height="46" alt="TWC logo" />
+<img src="./public/og-image.png" width="48" height="46" alt="TWC logo" />
 
 # TWC
 
-**Frontend-only Splitwise, now with a multimodal chat assistant that reads receipts.**
+**A frontend-only group-expense splitter with a multimodal chat assistant that reads receipts.**
 
 [![Pages deploy](https://img.shields.io/github/deployments/randyharrogates/twc/github-pages?label=pages&logo=github)](https://randyharrogates.github.io/twc/)
 [![Last commit](https://img.shields.io/github/last-commit/randyharrogates/twc?logo=git&logoColor=white)](https://github.com/randyharrogates/twc/commits/main)
@@ -22,25 +22,39 @@
 
 ## Table of contents
 
-- [What is TWC?](#what-is-twc)
-- [Features](#features)
-- [Screenshots](#screenshots)
-- [Architecture](#architecture)
-- [Quick start](#quick-start)
-- [Chat assistant deep-dive](#chat-assistant-deep-dive)
-- [Bring-your-own API key & safety rails](#bring-your-own-api-key--safety-rails)
-- [Security & trust](#security--trust)
-- [Development](#development)
-- [Deployment](#deployment)
-- [Contributing](#contributing)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
+- [TWC](#twc)
+  - [Table of contents](#table-of-contents)
+  - [What is TWC?](#what-is-twc)
+  - [Features](#features)
+    - [Splitting](#splitting)
+    - [Currencies](#currencies)
+    - [LLM providers](#llm-providers)
+    - [Safety rails](#safety-rails)
+  - [Screenshots](#screenshots)
+  - [Architecture](#architecture)
+  - [Quick start](#quick-start)
+  - [Chat assistant deep-dive](#chat-assistant-deep-dive)
+    - [Slash commands](#slash-commands)
+    - [Plan mode](#plan-mode)
+    - [Tool registry](#tool-registry)
+    - [Streaming phase labels](#streaming-phase-labels)
+  - [Bring-your-own API key \& safety rails](#bring-your-own-api-key--safety-rails)
+    - [Proxy upgrade path](#proxy-upgrade-path)
+  - [Security \& trust](#security--trust)
+  - [Development](#development)
+    - [Commands](#commands)
+    - [Testing](#testing)
+    - [Skills](#skills)
+  - [Deployment](#deployment)
+  - [Contributing](#contributing)
+  - [Acknowledgments](#acknowledgments)
+  - [License](#license)
 
 ---
 
 ## What is TWC?
 
-**TWC is a Splitwise-style expense splitter that runs entirely in your browser.** Create a
+**TWC is a group-expense splitter that runs entirely in your browser.** Create a
 group, log who paid for what, pick a per-expense split rule, and read a minimized
 "who owes whom" settlement. Money is stored as **integer minor units** (cents / yen /
 won) in the expense's native currency and only crosses a float boundary at FX conversion
@@ -54,7 +68,7 @@ draft pipeline terminates in the same `addExpense` action you'd hit with the for
 
 **Zero backend, zero auth, zero secrets at rest on a server.** TWC deploys as a static
 bundle to GitHub Pages. Real LLM providers are **bring-your-own-key**: you paste an
-Anthropic or OpenAI key into Settings, it lives in *your* `localStorage`, and it is
+Anthropic or OpenAI key into Settings, it lives in _your_ `localStorage`, and it is
 redacted from exports and never leaves the browser except as a request header. A
 Cloudflare Worker proxy is the documented escape hatch if a shared-key mode is ever
 needed — not built today.
@@ -68,29 +82,29 @@ needed — not built today.
 The four modes all honor the invariant `Σ shares === expense.amountMinor` via the
 largest-remainder method (pennies routed to the earliest participants).
 
-| Mode | Input | Behavior |
-|---|---|---|
-| `even` | participants list | Equal shares; remainder cents distributed deterministically. |
-| `shares` | integer weights per participant | Proportional to weights, then largest-remainder. |
-| `percent` | percentage per participant, Σ = 100 | Proportional to percent, then largest-remainder. |
-| `exact` | explicit minor-unit share per participant | Sum must equal `amountMinor` or validation rejects. |
+| Mode      | Input                                     | Behavior                                                     |
+| --------- | ----------------------------------------- | ------------------------------------------------------------ |
+| `even`    | participants list                         | Equal shares; remainder cents distributed deterministically. |
+| `shares`  | integer weights per participant           | Proportional to weights, then largest-remainder.             |
+| `percent` | percentage per participant, Σ = 100       | Proportional to percent, then largest-remainder.             |
+| `exact`   | explicit minor-unit share per participant | Sum must equal `amountMinor` or validation rejects.          |
 
 ### Currencies
 
 The allow-list is frozen in [`src/lib/currency.ts`](src/lib/currency.ts); do not hardcode
 codes, symbols, or decimals elsewhere.
 
-| Code | Name | Symbol | Minor decimals |
-|---|---|---|:-:|
-| SGD | Singapore Dollar | S$ | 2 |
-| MYR | Malaysian Ringgit | RM | 2 |
-| USD | US Dollar | $ | 2 |
-| KRW | Korean Won | ₩ | 0 |
-| JPY | Japanese Yen | ¥ | 0 |
-| TWD | New Taiwan Dollar | NT$ | 0 |
-| EUR | Euro | € | 2 |
-| GBP | British Pound | £ | 2 |
-| THB | Thai Baht | ฿ | 2 |
+| Code | Name              | Symbol | Minor decimals |
+| ---- | ----------------- | ------ | :------------: |
+| SGD  | Singapore Dollar  | S$     |       2        |
+| MYR  | Malaysian Ringgit | RM     |       2        |
+| USD  | US Dollar         | $      |       2        |
+| KRW  | Korean Won        | ₩      |       0        |
+| JPY  | Japanese Yen      | ¥      |       0        |
+| TWD  | New Taiwan Dollar | NT$    |       0        |
+| EUR  | Euro              | €      |       2        |
+| GBP  | British Pound     | £      |       2        |
+| THB  | Thai Baht         | ฿      |       2        |
 
 ### LLM providers
 
@@ -98,35 +112,31 @@ Both providers are wired via direct `fetch` — no SDK. Models and prices live i
 [`src/lib/llm/models.ts`](src/lib/llm/models.ts); each entry carries a
 `lastVerifiedIso` and CI fails once an entry is >365 days old.
 
-| Provider | Models | Streaming | Tool use | Thinking / reasoning |
-|---|---|:-:|:-:|---|
-| **Anthropic** | Claude Haiku 4.5, Sonnet 4.6, Opus 4.7 | ✔ | ✔ | Optional extended thinking via `thinking: { budget_tokens }` |
-| **OpenAI** | GPT-5, GPT-5 mini, GPT-4.1, GPT-4.1 mini, GPT-4o mini | ✔ | ✔ | Intrinsic reasoning on GPT-5 family (`reasoning_effort`, `max_completion_tokens`) |
+| Provider      | Models                                                | Streaming | Tool use | Thinking / reasoning                                                              |
+| ------------- | ----------------------------------------------------- | :-------: | :------: | --------------------------------------------------------------------------------- |
+| **Anthropic** | Claude Haiku 4.5, Sonnet 4.6, Opus 4.7                |     ✔     |    ✔     | Optional extended thinking via `thinking: { budget_tokens }`                      |
+| **OpenAI**    | GPT-5, GPT-5 mini, GPT-4.1, GPT-4.1 mini, GPT-4o mini |     ✔     |    ✔     | Intrinsic reasoning on GPT-5 family (`reasoning_effort`, `max_completion_tokens`) |
 
 ### Safety rails
 
-| Rail | Detail |
-|---|---|
-| Rate limiter | 10 requests / minute and 100 / hour (defaults, configurable). Persists across reloads so refresh cannot bypass. |
-| Spend caps | Per-day and per-month µUSD caps checked against `costTracker` before every send. |
-| Image consent | One-time per-provider modal before the first image upload; explains what bytes are sent. |
-| Magic-byte MIME check | JPEG / PNG / WebP enforced by both declared MIME *and* actual header bytes. |
-| Preflight | Estimates tokens and rejects over-context-window or >5 MB encoded-image requests without spending a quota. |
+| Rail                       | Detail                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Rate limiter               | 10 requests / minute and 100 / hour (defaults, configurable). Persists across reloads so refresh cannot bypass.           |
+| Spend caps                 | Per-day and per-month µUSD caps checked against `costTracker` before every send.                                          |
+| Image consent              | One-time per-provider modal before the first image upload; explains what bytes are sent.                                  |
+| Magic-byte MIME check      | JPEG / PNG / WebP enforced by both declared MIME _and_ actual header bytes.                                               |
+| Preflight                  | Estimates tokens and rejects over-context-window or >5 MB encoded-image requests without spending a quota.                |
 | Image bytes in memory only | Uploaded images live in an in-memory `Map`; persisted messages keep `base64: ''` and render as placeholders after reload. |
-| API keys redacted | Keys never appear in request bodies, logs, or `exportState()` — only on the request headers. |
+| API keys redacted          | Keys never appear in request bodies, logs, or `exportState()` — only on the request headers.                              |
 
 ---
 
 ## Screenshots
 
-<!-- Screenshot capture is a follow-up; uncomment once `docs/screenshots/*.png` are added. -->
-<!-- ![Hero](docs/screenshots/hero.png) -->
-<!-- ![Group detail](docs/screenshots/group-detail.png) -->
-<!-- ![Chat panel parsing a receipt](docs/screenshots/chat-panel.png) -->
-<!-- ![Settings dialog with BYO-key entry](docs/screenshots/settings.png) -->
-
-_Screenshots pending. Open the [live demo](https://randyharrogates.github.io/twc/) in
-the meantime._
+![Hero](docs/screenshots/hero.png)
+![Group detail](docs/screenshots/group-detail.png)
+![Chat panel](docs/screenshots/chat-panel.png)
+![Settings dialog with BYO-key entry](docs/screenshots/settings.png)
 
 ---
 
@@ -228,17 +238,17 @@ receipts, type free-form notes, and send. The assistant runs an agentic loop wit
 Dispatched pre-send by
 [`slashCommands.ts`](src/components/chat/slashCommands.ts).
 
-| Command | Effect |
-|---|---|
-| `/plan` \| `/plan toggle` | Toggle plan mode (same as Shift+Tab). |
-| `/plan on` \| `/plan off` | Set plan mode explicitly. |
-| `/model` | Show the active model. |
-| `/model <id>` | Switch the active model; also sets the provider. |
+| Command                   | Effect                                           |
+| ------------------------- | ------------------------------------------------ |
+| `/plan` \| `/plan toggle` | Toggle plan mode (same as Shift+Tab).            |
+| `/plan on` \| `/plan off` | Set plan mode explicitly.                        |
+| `/model`                  | Show the active model.                           |
+| `/model <id>`             | Switch the active model; also sets the provider. |
 
 ### Plan mode
 
 **Shift+Tab** in the composer toggles plan mode. Under plan mode, `add_member` and
-`submit_drafts` are *physically* removed from the tool list — the model cannot emit
+`submit_drafts` are _physically_ removed from the tool list — the model cannot emit
 those calls because the schemas aren't sent. A `PLAN MODE (active)` block is also
 appended to the system prompt. When a plan-mode turn ends, the last-assistant bubble
 gets an **Execute this plan** button; clicking it re-runs the last user text with both
@@ -250,13 +260,13 @@ Primary specs come from
 [`primaryToolSpecs(group, planMode)`](src/lib/llm/tools/registry.ts); executor via
 `createAgentExecutor(group, deps)`.
 
-| Tool | Purpose |
-|---|---|
-| `add_member` | Add a new member to the active group. Mutating — goes through `PermissionPrompter`. |
-| `resolve_name` | Fuzzy-match a name to an existing member id. |
-| `resolve_payer` | Ask the user (via `PayerPromptDialog`) to disambiguate which member paid. Interactive, not mutating. |
+| Tool             | Purpose                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `add_member`     | Add a new member to the active group. Mutating — goes through `PermissionPrompter`.                    |
+| `resolve_name`   | Fuzzy-match a name to an existing member id.                                                           |
+| `resolve_payer`  | Ask the user (via `PayerPromptDialog`) to disambiguate which member paid. Interactive, not mutating.   |
 | `lookup_fx_rate` | Prompt the user (via `RateInputDialog`) for an FX rate, write it to the group rate cache. Interactive. |
-| `submit_drafts` | Emit a final array of expense drafts that hydrate into `DraftCard`s. Gated by plan mode. |
+| `submit_drafts`  | Emit a final array of expense drafts that hydrate into `DraftCard`s. Gated by plan mode.               |
 
 ### Streaming phase labels
 
@@ -265,12 +275,12 @@ Primary specs come from
 long tool loops don't feel frozen; the final `elapsedMs` persists on the assistant
 message alongside `usage` / `modelId`.
 
-| Phase kind | Surfaced as |
-|---|---|
-| `starting` | `starting…` |
-| `thinking` | `thinking…` |
+| Phase kind            | Surfaced as                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| `starting`            | `starting…`                                                         |
+| `thinking`            | `thinking…`                                                         |
 | `calling_tool:<name>` | `resolving name…`, `looking up FX rate…`, `preparing drafts…`, etc. |
-| `tool_done:<name>` | Bubble flips back to the next phase or to streaming text. |
+| `tool_done:<name>`    | Bubble flips back to the next phase or to streaming text.           |
 
 ---
 
@@ -319,8 +329,8 @@ API key is stored in plaintext, that sibling page can exfiltrate it.
 **Passphrase vault.** To close that gap, TWC includes a passphrase-based vault (opt-in)
 that encrypts `settings.apiKeys.<provider>` at rest. Implementation:
 
-- PBKDF2-SHA256 with a **per-user 16-byte random salt**, **600,000 iterations** — the
-  same parameters as the pattern ported from `/Users/randychan/git/Leeseidon`.
+- PBKDF2-SHA256 with a **per-user 16-byte random salt**, **600,000 iterations** — using
+  the same PBKDF2 + AES-GCM parameters as a prior project.
 - AES-GCM 256-bit key, 12-byte random IV per encrypted value.
 - Tagged-string ciphertext: `enc.v1.<iv_base64>.<ct_base64>`. Anything that doesn't
   start with `enc.v1.` is plaintext.
@@ -337,9 +347,9 @@ blob from `localStorage`, but it cannot decrypt without your passphrase. That is
 meaningful mitigation available to a pure-frontend app on a shared origin. For stronger
 isolation, deploy under a custom domain you control — then the origin is no longer shared.
 
-**What the vault does *not* protect against.** XSS on `randyharrogates.github.io/twc/`
+**What the vault does _not_ protect against.** XSS on `randyharrogates.github.io/twc/`
 itself (e.g. via a compromised npm dependency that runs inside TWC's page context) can
-read the derived `CryptoKey` from memory *while the vault is unlocked*. Treat unlock as a
+read the derived `CryptoKey` from memory _while the vault is unlocked_. Treat unlock as a
 session permission: unlock, send, lock when you step away.
 
 **Clear or wipe.**
@@ -399,15 +409,15 @@ the file you're editing.
 
 ### Commands
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Vite dev server at `http://localhost:5173/twc/`. |
-| `npm run build` | `tsc -b && vite build` → `dist/`. |
-| `npm run test` | `vitest run` (33 files, mirrors `src/**`). |
-| `npm run test:watch` | Vitest in watch mode. |
-| `npm run test:ui` | Vitest UI. |
-| `npm run lint` | `eslint .` |
-| `npm run preview` | Serve the built `dist/` locally. |
+| Command              | What it does                                     |
+| -------------------- | ------------------------------------------------ |
+| `npm run dev`        | Vite dev server at `http://localhost:5173/twc/`. |
+| `npm run build`      | `tsc -b && vite build` → `dist/`.                |
+| `npm run test`       | `vitest run` (33 files, mirrors `src/**`).       |
+| `npm run test:watch` | Vitest in watch mode.                            |
+| `npm run test:ui`    | Vitest UI.                                       |
+| `npm run lint`       | `eslint .`                                       |
+| `npm run preview`    | Serve the built `dist/` locally.                 |
 
 ### Testing
 
@@ -426,17 +436,17 @@ one-to-one (`lib/money.ts` → `test/money.test.ts`). Rules of thumb:
 
 Repo-local skills in [`.claude/skills/`](.claude/skills/):
 
-| Skill | Use when |
-|---|---|
-| `qthink` | Multi-file or invariant-touching change — deep plan-mode evaluation. |
-| `qcode` | TDD implementation with lint / test / build gates. |
-| `qcheck` | Skeptical senior-engineer review of a non-trivial change. |
-| `qtest` | Verify Vitest files mirror `src/**` under `src/test/`. |
-| `review-function` | Writing-Functions checklist applied to one function. |
-| `review-test` | Writing-Tests checklist applied to one test. |
-| `add-split-mode` | Introducing a new `SplitMode`. |
-| `add-llm-provider` | Wiring a real LLM provider behind `AgentClient`. |
-| `commit` | Conventional Commits helper (never commits without explicit instruction). |
+| Skill              | Use when                                                                  |
+| ------------------ | ------------------------------------------------------------------------- |
+| `qthink`           | Multi-file or invariant-touching change — deep plan-mode evaluation.      |
+| `qcode`            | TDD implementation with lint / test / build gates.                        |
+| `qcheck`           | Skeptical senior-engineer review of a non-trivial change.                 |
+| `qtest`            | Verify Vitest files mirror `src/**` under `src/test/`.                    |
+| `review-function`  | Writing-Functions checklist applied to one function.                      |
+| `review-test`      | Writing-Tests checklist applied to one test.                              |
+| `add-split-mode`   | Introducing a new `SplitMode`.                                            |
+| `add-llm-provider` | Wiring a real LLM provider behind `AgentClient`.                          |
+| `commit`           | Conventional Commits helper (never commits without explicit instruction). |
 
 Commands: [`/qpullrequest`](.claude/commands/qpullrequest.md),
 [`/qchangelog`](.claude/commands/qchangelog.md). Agent:

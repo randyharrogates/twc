@@ -7,8 +7,8 @@
  * *meta* (salt, iterations, encrypted probe) so `unlock(passphrase)` can
  * verify a candidate passphrase without comparing to real key material.
  *
- * Ported from /Users/randychan/git/Leeseidon/src/lib/storage/passphrase_service.ts
- * and narrowed to TWC's single use case (string secrets, not JSON rows).
+ * Adapted from a prior project's passphrase service and narrowed to TWC's
+ * single use case (string secrets, not JSON rows).
  */
 
 import {

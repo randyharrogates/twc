@@ -7,8 +7,8 @@
  *
  * Pure module — no DOM / React / localStorage / Zustand imports. Consumers
  * hand in a `CryptoKey` (the vault owns the derived key in session memory).
- * Ported from /Users/randychan/git/Leeseidon/src/lib/storage/crypto.ts with
- * the JSON-payload signature narrowed to strings for TWC's single use case.
+ * Uses the same PBKDF2-SHA256 + AES-GCM parameters as a prior project,
+ * with the JSON-payload signature narrowed to strings for TWC's single use case.
  */
 
 export const PBKDF2_ITERATIONS = 600_000;
