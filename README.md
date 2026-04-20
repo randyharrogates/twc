@@ -16,6 +16,8 @@
 
 **[▶ Live demo — randyharrogates.github.io/twc](https://randyharrogates.github.io/twc/)**
 
+<video src="https://github.com/randyharrogates/twc/raw/main/public/TwcDemo.mp4" controls muted playsinline width="720"></video>
+
 </div>
 
 ---
