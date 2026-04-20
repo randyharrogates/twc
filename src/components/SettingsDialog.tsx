@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useAppStore, usePolicy, useSettings } from '../state/store';
+import { useAppStore, usePolicy, useSettings, useVaultUnlocked } from '../state/store';
 import { Button } from './ui/Button';
 import { Dialog } from './ui/Dialog';
 import { Input } from './ui/Input';
 import { Label } from './ui/Label';
 import { Select } from './ui/Select';
 import { APIKeyHelpPanel } from './APIKeyHelpPanel';
+import { SecurityPanel } from './SecurityPanel';
 import { DEFAULT_MODEL_ID, MODELS, MODEL_IDS } from '../lib/llm/models';
 import type { ModelId, ReasoningEffort } from '../lib/llm/types';
 import type { Provider } from '../lib/policy';
@@ -47,6 +48,7 @@ export function SettingsDialog({ open, onClose }: Props) {
 function ProvidersTab() {
   const settings = useSettings();
   const policy = usePolicy();
+  const vaultUnlocked = useVaultUnlocked();
   const setLLMProvider = useAppStore((s) => s.setLLMProvider);
   const setApiKey = useAppStore((s) => s.setApiKey);
   const clearApiKey = useAppStore((s) => s.clearApiKey);
@@ -62,9 +64,11 @@ function ProvidersTab() {
 
   const activeModelId = settings.modelOverride ?? DEFAULT_MODEL_ID[settings.llmProvider];
   const reasoningKind = MODELS[activeModelId].reasoningKind;
+  const vaultLocked = settings.vault !== null && !vaultUnlocked;
 
   return (
     <div className="space-y-4 text-sm">
+      <SecurityPanel />
       <div>
         <Label htmlFor="llm-provider">Active provider</Label>
         <Select
@@ -104,6 +108,7 @@ function ProvidersTab() {
           provider={p}
           apiKey={settings.apiKeys[p] ?? ''}
           allowed={policy.allowedProviders.includes(p)}
+          vaultLocked={vaultLocked}
           onSetKey={(k) => setApiKey(p, k)}
           onClearKey={() => clearApiKey(p)}
           onToggleAllowed={() => toggleAllowed(p)}
@@ -117,16 +122,29 @@ interface RowProps {
   provider: Provider;
   apiKey: string;
   allowed: boolean;
-  onSetKey: (key: string) => void;
+  vaultLocked: boolean;
+  onSetKey: (key: string) => Promise<void>;
   onClearKey: () => void;
   onToggleAllowed: () => void;
 }
 
-function ProviderKeyRow({ provider, apiKey, allowed, onSetKey, onClearKey, onToggleAllowed }: RowProps) {
+function ProviderKeyRow({
+  provider,
+  apiKey,
+  allowed,
+  vaultLocked,
+  onSetKey,
+  onClearKey,
+  onToggleAllowed,
+}: RowProps) {
   const [revealed, setRevealed] = useState(false);
-  const [draft, setDraft] = useState(apiKey);
+  const stored = apiKey;
+  const storedIsEncrypted = stored.startsWith('enc.v1.');
+  const displayValue = storedIsEncrypted ? '' : stored;
+  const [draft, setDraft] = useState(displayValue);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [clearStatus, setClearStatus] = useState<'idle' | 'cleared'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const label = provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
 
   const flashSaved = () => {
@@ -138,6 +156,22 @@ function ProviderKeyRow({ provider, apiKey, allowed, onSetKey, onClearKey, onTog
     window.setTimeout(() => setClearStatus('idle'), 1500);
   };
 
+  const placeholder = storedIsEncrypted
+    ? 'Encrypted key stored — paste a new key to replace'
+    : provider === 'anthropic'
+      ? 'sk-ant-…'
+      : 'sk-…';
+
+  const handleSave = async () => {
+    setSaveError(null);
+    try {
+      await onSetKey(draft.trim());
+      flashSaved();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed.');
+    }
+  };
+
   return (
     <div className="space-y-2 rounded-xl border border-ink-300 bg-ink-100/40 p-3">
       <div className="flex items-center justify-between gap-2">
@@ -147,6 +181,11 @@ function ProviderKeyRow({ provider, apiKey, allowed, onSetKey, onClearKey, onTog
           Allow this provider
         </label>
       </div>
+      {storedIsEncrypted && (
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-300">
+          Key stored encrypted at rest (AES-GCM). Paste a new value to replace it.
+        </div>
+      )}
       <div>
         <Label htmlFor={`${provider}-key`}>API key</Label>
         <div className="flex flex-wrap gap-2">
@@ -154,7 +193,7 @@ function ProviderKeyRow({ provider, apiKey, allowed, onSetKey, onClearKey, onTog
             id={`${provider}-key`}
             type={revealed ? 'text' : 'password'}
             value={draft}
-            placeholder={`${provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}`}
+            placeholder={placeholder}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => setRevealed(false)}
           />
@@ -164,10 +203,13 @@ function ProviderKeyRow({ provider, apiKey, allowed, onSetKey, onClearKey, onTog
           <Button
             size="sm"
             variant="primary"
-            onClick={() => {
-              onSetKey(draft.trim());
-              flashSaved();
-            }}
+            disabled={vaultLocked && draft.trim().length > 0}
+            title={
+              vaultLocked && draft.trim().length > 0
+                ? 'Unlock the vault in Security before saving a new key.'
+                : undefined
+            }
+            onClick={() => void handleSave()}
           >
             {saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
           </Button>
@@ -183,6 +225,14 @@ function ProviderKeyRow({ provider, apiKey, allowed, onSetKey, onClearKey, onTog
             {clearStatus === 'cleared' ? 'Cleared ✓' : 'Clear key'}
           </Button>
         </div>
+        {saveError && (
+          <div
+            role="alert"
+            className="mt-2 rounded-md border border-rose-400/50 bg-rose-500/10 px-3 py-2 text-xs text-rose-300"
+          >
+            {saveError}
+          </div>
+        )}
       </div>
       <APIKeyHelpPanel provider={provider} />
     </div>

@@ -29,6 +29,7 @@
 - [Quick start](#quick-start)
 - [Chat assistant deep-dive](#chat-assistant-deep-dive)
 - [Bring-your-own API key & safety rails](#bring-your-own-api-key--safety-rails)
+- [Security & trust](#security--trust)
 - [Development](#development)
 - [Deployment](#deployment)
 - [Contributing](#contributing)
@@ -295,6 +296,63 @@ provider directly today
 (`provider === 'anthropic' ? new AnthropicClient({...}) : new OpenAIClient({...})`);
 adding a proxy mode means extending that conditional with a third branch that
 constructs a `ProxyClient` against the worker URL. Not built now; documented here.
+
+---
+
+## Security & trust
+
+TWC is published at <https://randyharrogates.github.io/twc/>. Before pasting an API key
+into a stranger's webpage, you deserve to know how the project handles it.
+
+**Threat model in one paragraph.** There is no server and no auth. Requests go directly
+from your browser to Anthropic / OpenAI with your own API key on the `x-api-key` /
+`Authorization` header. TWC has no telemetry, no analytics, no third-party scripts
+beyond Google Fonts (CSS only — the CSP forbids third-party script sources). `npm audit`
+is green; every dependency is pinned; no `dangerouslySetInnerHTML`. All image parsing
+runs through a magic-byte verifier before encoding.
+
+**The shared-origin risk.** `randyharrogates.github.io` is a single origin shared by
+every GitHub Pages site under the user. `localStorage` is origin-scoped, so a sibling
+page at `randyharrogates.github.io/<other-site>/` can read TWC's `twc-v1` entry. If your
+API key is stored in plaintext, that sibling page can exfiltrate it.
+
+**Passphrase vault.** To close that gap, TWC includes a passphrase-based vault (opt-in)
+that encrypts `settings.apiKeys.<provider>` at rest. Implementation:
+
+- PBKDF2-SHA256 with a **per-user 16-byte random salt**, **600,000 iterations** — the
+  same parameters as the pattern ported from `/Users/randychan/git/Leeseidon`.
+- AES-GCM 256-bit key, 12-byte random IV per encrypted value.
+- Tagged-string ciphertext: `enc.v1.<iv_base64>.<ct_base64>`. Anything that doesn't
+  start with `enc.v1.` is plaintext.
+- The passphrase is **never persisted**. Only a salt, iteration count, and a small
+  probe (a known plaintext encrypted with the derived key) are saved. The probe lets
+  `unlock(passphrase)` verify a candidate passphrase without checking against real key
+  material.
+- The derived `CryptoKey` lives only in `KeyVault`'s private memory for the session.
+  Lock the tab (or close it) and the key disappears; the next send prompts for the
+  passphrase again.
+
+**What the vault protects against.** A sibling shared-origin site can read the ciphertext
+blob from `localStorage`, but it cannot decrypt without your passphrase. That is the only
+meaningful mitigation available to a pure-frontend app on a shared origin. For stronger
+isolation, deploy under a custom domain you control — then the origin is no longer shared.
+
+**What the vault does *not* protect against.** XSS on `randyharrogates.github.io/twc/`
+itself (e.g. via a compromised npm dependency that runs inside TWC's page context) can
+read the derived `CryptoKey` from memory *while the vault is unlocked*. Treat unlock as a
+session permission: unlock, send, lock when you step away.
+
+**Clear or wipe.**
+
+- **Clear a key**: Settings → Providers → `Clear key`, or DevTools → Application →
+  Local Storage → `twc-v1` → remove `settings.apiKeys.<provider>`.
+- **Wipe the vault**: Settings → Security → `Wipe vault`. This deletes the passphrase
+  meta AND all encrypted keys. Forgetting a passphrase is unrecoverable by design; a
+  backdoor would defeat the encryption.
+
+Source: [`src/lib/crypto.ts`](src/lib/crypto.ts),
+[`src/lib/keyVault.ts`](src/lib/keyVault.ts),
+[`src/components/SecurityPanel.tsx`](src/components/SecurityPanel.tsx).
 
 ---
 

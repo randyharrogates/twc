@@ -165,12 +165,67 @@ function buildMessage(id: string, drafts: ChatMessage['drafts'] = []): ChatMessa
   };
 }
 
+describe('store passphrase vault', () => {
+  beforeEach(reset);
+
+  it('setupVault encrypts existing plaintext keys in place and unlocks the session', async () => {
+    const s = useAppStore.getState();
+    await s.setApiKey('anthropic', 'sk-ant-plain');
+    expect(useAppStore.getState().settings.apiKeys.anthropic).toBe('sk-ant-plain');
+    await useAppStore.getState().setupVault('correct horse battery staple');
+    const after = useAppStore.getState();
+    expect(after.settings.vault).not.toBeNull();
+    expect(after.vaultUnlocked).toBe(true);
+    expect(after.settings.apiKeys.anthropic?.startsWith('enc.v1.')).toBe(true);
+    // Exported state never contains plaintext, and the vault meta is preserved.
+    expect(after.exportState()).not.toContain('sk-ant-plain');
+  });
+
+  it('lockVault clears the in-memory key; unlockVault with the right passphrase restores use', async () => {
+    const s = useAppStore.getState();
+    await s.setApiKey('openai', 'sk-openai-plain');
+    await useAppStore.getState().setupVault('pass-1');
+    useAppStore.getState().lockVault();
+    expect(useAppStore.getState().vaultUnlocked).toBe(false);
+    await useAppStore.getState().unlockVault('pass-1');
+    expect(useAppStore.getState().vaultUnlocked).toBe(true);
+  });
+
+  it('unlockVault with the wrong passphrase throws and leaves session locked', async () => {
+    await useAppStore.getState().setupVault('pass-1');
+    useAppStore.getState().lockVault();
+    await expect(useAppStore.getState().unlockVault('wrong')).rejects.toThrow(
+      /passphrase is incorrect/i,
+    );
+    expect(useAppStore.getState().vaultUnlocked).toBe(false);
+  });
+
+  it('wipeVault clears vault meta AND all apiKeys', async () => {
+    const s = useAppStore.getState();
+    await s.setApiKey('anthropic', 'sk-ant-plain');
+    await useAppStore.getState().setupVault('pass-1');
+    useAppStore.getState().wipeVault();
+    const after = useAppStore.getState();
+    expect(after.settings.vault).toBeNull();
+    expect(after.settings.apiKeys).toEqual({});
+    expect(after.vaultUnlocked).toBe(false);
+  });
+
+  it('setApiKey throws when the vault is set up but locked', async () => {
+    await useAppStore.getState().setupVault('pass-1');
+    useAppStore.getState().lockVault();
+    await expect(useAppStore.getState().setApiKey('anthropic', 'sk-new')).rejects.toThrow(
+      /unlock/i,
+    );
+  });
+});
+
 describe('store settings slice', () => {
   beforeEach(reset);
 
-  it('stores, clears, and masks API keys; keys do not appear in exportState', () => {
+  it('stores, clears, and masks API keys; keys do not appear in exportState', async () => {
     const s = useAppStore.getState();
-    s.setApiKey('anthropic', 'sk-ant-secret');
+    await s.setApiKey('anthropic', 'sk-ant-secret');
     s.setLLMProvider('anthropic');
     const after = useAppStore.getState();
     expect(after.settings.apiKeys.anthropic).toBe('sk-ant-secret');
@@ -427,7 +482,7 @@ describe('store planMode setting', () => {
       version: number;
     };
     expect(parsed.state.settings.planMode).toBe(true);
-    expect(parsed.version).toBe(6);
+    expect(parsed.version).toBe(7);
   });
 
   it('setPlanMode(false) flips the flag back', () => {

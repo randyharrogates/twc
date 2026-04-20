@@ -12,6 +12,7 @@ import { ConsentDialog } from './ConsentDialog';
 import { ToolConfirmDialog } from './ToolConfirmDialog';
 import { RateInputDialog } from './RateInputDialog';
 import { PayerPromptDialog } from './PayerPromptDialog';
+import { KeyReminderBanner } from './KeyReminderBanner';
 import { useAppStore } from '../state/store';
 import type { Provider } from '../lib/policy';
 import type { CurrencyCode, Member } from '../types';
@@ -100,6 +101,7 @@ export function Shell() {
     <div className="relative min-h-full">
       <BackgroundLayer />
       <Nav onOpenSettings={() => setSettingsOpen(true)} />
+      <KeyReminderBanner onOpenSettings={() => setSettingsOpen(true)} />
       <main>
         <Hero />
         <GroupGrid />

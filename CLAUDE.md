@@ -11,6 +11,23 @@ Deployment target: **GitHub Pages** (static). Real providers ship as **BYO-key**
 backend required; a Cloudflare Worker proxy is the documented escape hatch if a
 shared-key mode is ever needed.
 
+## Passphrase vault — the shared-origin mitigation
+
+TWC is published under `randyharrogates.github.io`, which is shared with every other
+GitHub Pages site under the same user — `localStorage` is origin-scoped, so a sibling
+page can read `twc-v1`. To stop sibling pages from using a pasted API key, TWC
+supports an opt-in session-scoped passphrase vault that encrypts
+`settings.apiKeys.<provider>` at rest with AES-GCM-256, keyed by PBKDF2-SHA256
+(600 000 iterations, 16-byte random salt). The derived `CryptoKey` lives only in
+`KeyVault`'s private memory for the session; the passphrase itself is **never
+persisted** — only the salt, iteration count, and an encrypted probe (stored on
+`settings.vault`) so `unlock(passphrase)` can verify a candidate. Ciphertext is a
+tagged string: `enc.v1.<iv>.<ct>`. The pattern is ported from
+`/Users/randychan/git/Leeseidon/src/lib/storage/` (PBKDF2-SHA256 + AES-GCM). Files:
+[`src/lib/crypto.ts`](src/lib/crypto.ts), [`src/lib/keyVault.ts`](src/lib/keyVault.ts),
+[`src/components/SecurityPanel.tsx`](src/components/SecurityPanel.tsx),
+[`src/components/UnlockDialog.tsx`](src/components/UnlockDialog.tsx).
+
 ## Stack
 
 - Vite + React 19 + TypeScript

@@ -17,6 +17,11 @@
   unless the user clicks "Reveal", and auto-re-mask on blur. `APIKeyHelpPanel.tsx` ships
   the three mandated UX pieces: generation instructions, security disclosure, clear-key
   instructions.
+- `SecurityPanel.tsx` is the only place that exposes passphrase setup / unlock / lock /
+  wipe. It mounts inside `SettingsDialog` (Providers tab, at the top). `UnlockDialog.tsx`
+  fires when a chat send fails with `VaultLockedError`; successful unlock retries the
+  send once. `KeyReminderBanner.tsx` mounts once at the top of the shell layout and is
+  state-aware (plaintext / unlocked / locked branches; session-scoped dismissal).
 - `ConsentDialog.tsx` must fire before the first image upload to each provider. It is
   triggered from `ChatPanel` via the `onConsentNeeded` prop; `Shell.tsx` owns the open
   state and calls `grantImageConsent` on confirm.

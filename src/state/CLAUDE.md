@@ -17,10 +17,16 @@
   `base64: ''`; the full data lives in `imageCache.ts` (module-level `Map`) and is lost on
   reload. Rationale: a 5 MB image × a handful of messages would blow the 5 MB
   localStorage quota. This is a permanent rule.
-- **API keys are plaintext in `settings.apiKeys`.** They are redacted from
-  `exportState()` (empty string in the export) and never appear in request bodies or
-  `console.log`. Users can clear them via `clearApiKey(provider)` or DevTools → Application
-  → Local Storage → `twc-v1`.
+- **API keys in `settings.apiKeys` are plaintext until the user sets a passphrase via
+  `setupVault`**, at which point each stored value is encrypted in place and stored as
+  `enc.v1.<iv>.<ct>`. The passphrase-derived `CryptoKey` lives only in `KeyVault`'s
+  private memory; it is never persisted. `settings.vault` holds salt + iterations + a
+  probe row for unlock verification. `vaultUnlocked: boolean` is a non-persisted
+  top-level field that drives UI. Persist version is now 7; migration from v6
+  additively sets `vault: null`. `setApiKey` is async and throws `VaultLockedError`
+  when the vault is set up but locked. `wipeVault` clears the vault meta AND all stored
+  API keys. Keys are redacted from `exportState()` (empty string in the export) and
+  never appear in request bodies or `console.log`.
 - **Rate-limiter state persists** so refresh does not bypass the cap. `consumeRateToken`
   is pure (delegates to `lib/rateLimiter.ts`); the action injects `Date.now()` once per
   call.

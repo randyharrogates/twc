@@ -71,6 +71,12 @@
   user settings (localStorage). Keys never appear in request bodies (only in headers),
   never in logs, never in exports. Each client has a `never includes the API key in the
   request body` test that pins this.
+- **Key retrieval is async and routed through the passphrase vault.** The stored value in
+  `settings.apiKeys.<provider>` may be plaintext or a `enc.v1.<iv>.<ct>` ciphertext;
+  `keyVault.decryptKey(stored)` returns the plaintext or throws `VaultLockedError` from
+  `errors.ts` when the value is encrypted but the vault is locked. `ChatPanel` awaits the
+  plaintext before constructing the provider client; on `VaultLockedError`, it opens
+  `UnlockDialog` and retries the send once.
 - **Cost math lives in `cost.ts`.** Prices are integer µUSD per million tokens; exactly
   two `Math.round` calls per turn at the µUSD boundary. No float propagates beyond.
 - **Model registry in `models.ts` must be refreshed yearly.** Every entry has a

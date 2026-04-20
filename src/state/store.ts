@@ -28,6 +28,8 @@ import {
   type RateLimiterState,
   type RateLimits,
 } from '../lib/rateLimiter';
+import { isEncrypted } from '../lib/crypto';
+import { keyVault, VaultLockedError, type VaultMeta } from '../lib/keyVault';
 import { clearImageCache, forgetImage } from './imageCache';
 
 export interface ExpenseInput {
@@ -49,6 +51,7 @@ export interface Settings {
   rateLimiter: RateLimiterState;
   rateLimits: RateLimits;
   retryConfig: { maxRetries: number; baseDelayMs: number };
+  vault: VaultMeta | null;
 }
 
 export interface Conversation {
@@ -78,6 +81,7 @@ export interface AppState {
   conversations: Record<string, Conversation>;
   policy: Policy;
   costTracker: CostTracker;
+  vaultUnlocked: boolean;
 
   createGroup: (name: string, baseCurrency: CurrencyCode) => string;
   renameGroup: (groupId: string, name: string) => void;
@@ -100,8 +104,12 @@ export interface AppState {
   deleteExpense: (groupId: string, expenseId: string) => void;
 
   setLLMProvider: (provider: 'anthropic' | 'openai') => void;
-  setApiKey: (provider: 'anthropic' | 'openai', key: string) => void;
+  setApiKey: (provider: 'anthropic' | 'openai', key: string) => Promise<void>;
   clearApiKey: (provider: 'anthropic' | 'openai') => void;
+  setupVault: (passphrase: string) => Promise<void>;
+  unlockVault: (passphrase: string) => Promise<void>;
+  lockVault: () => void;
+  wipeVault: () => void;
   setModelOverride: (id: ModelId | null) => void;
   setReasoningEffort: (effort: ReasoningEffort) => void;
   setPlanMode: (v: boolean) => void;
@@ -139,6 +147,7 @@ function defaultSettings(): Settings {
     rateLimiter: initialRateLimiterState(DEFAULT_LIMITS, 0),
     rateLimits: DEFAULT_LIMITS,
     retryConfig: { maxRetries: 3, baseDelayMs: 500 },
+    vault: null,
   };
 }
 
@@ -164,6 +173,7 @@ const initialState = {
   conversations: {} as Record<string, Conversation>,
   policy: DEFAULT_POLICY,
   costTracker: defaultCostTracker(),
+  vaultUnlocked: false,
 };
 
 function memberReferenceCount(group: Group, memberId: string): number {
@@ -386,10 +396,32 @@ export const useAppStore = create<AppState>()(
       setLLMProvider: (provider) =>
         set((s) => ({ settings: { ...s.settings, llmProvider: provider } })),
 
-      setApiKey: (provider, key) =>
+      setApiKey: async (provider, key) => {
+        const trimmed = key.trim();
+        if (trimmed === '') {
+          set((s) => {
+            const next = { ...s.settings.apiKeys };
+            delete next[provider];
+            return { settings: { ...s.settings, apiKeys: next } };
+          });
+          return;
+        }
+        const vault = get().settings.vault;
+        let stored = trimmed;
+        if (vault !== null) {
+          if (!keyVault.isUnlocked()) {
+            throw new VaultLockedError(
+              'Unlock the passphrase vault in Settings → Security before saving a new key.',
+            );
+          }
+          if (!isEncrypted(trimmed)) {
+            stored = await keyVault.encryptKey(trimmed);
+          }
+        }
         set((s) => ({
-          settings: { ...s.settings, apiKeys: { ...s.settings.apiKeys, [provider]: key } },
-        })),
+          settings: { ...s.settings, apiKeys: { ...s.settings.apiKeys, [provider]: stored } },
+        }));
+      },
 
       clearApiKey: (provider) =>
         set((s) => {
@@ -397,6 +429,46 @@ export const useAppStore = create<AppState>()(
           delete next[provider];
           return { settings: { ...s.settings, apiKeys: next } };
         }),
+
+      setupVault: async (passphrase) => {
+        if (get().settings.vault !== null) {
+          throw new Error('A passphrase is already configured. Wipe the vault to set a new one.');
+        }
+        const { meta } = await keyVault.setup(passphrase);
+        const existing = get().settings.apiKeys;
+        const reencrypted: Settings['apiKeys'] = {};
+        for (const p of ['anthropic', 'openai'] as const) {
+          const v = existing[p];
+          if (!v || v.length === 0) continue;
+          reencrypted[p] = isEncrypted(v) ? v : await keyVault.encryptKey(v);
+        }
+        set((s) => ({
+          vaultUnlocked: true,
+          settings: { ...s.settings, vault: meta, apiKeys: reencrypted },
+        }));
+      },
+
+      unlockVault: async (passphrase) => {
+        const meta = get().settings.vault;
+        if (meta === null) {
+          throw new Error('No passphrase is configured. Set one up first.');
+        }
+        await keyVault.unlock(passphrase, meta);
+        set({ vaultUnlocked: true });
+      },
+
+      lockVault: () => {
+        keyVault.lock();
+        set({ vaultUnlocked: false });
+      },
+
+      wipeVault: () => {
+        keyVault.wipe();
+        set((s) => ({
+          vaultUnlocked: false,
+          settings: { ...s.settings, vault: null, apiKeys: {} },
+        }));
+      },
 
       setModelOverride: (id) =>
         set((s) => ({ settings: { ...s.settings, modelOverride: id } })),
@@ -545,6 +617,7 @@ export const useAppStore = create<AppState>()(
 
       resetAll: () => {
         clearImageCache();
+        keyVault.wipe();
         set({
           groups: {},
           groupOrder: [],
@@ -553,6 +626,7 @@ export const useAppStore = create<AppState>()(
           costTracker: defaultCostTracker(),
           policy: DEFAULT_POLICY,
           settings: defaultSettings(),
+          vaultUnlocked: false,
         });
       },
 
@@ -591,7 +665,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'twc-v1',
-      version: 6,
+      version: 7,
       partialize: (s) => ({
         groups: s.groups,
         groupOrder: s.groupOrder,
@@ -640,24 +714,40 @@ export const useAppStore = create<AppState>()(
             } as Settings,
           };
         };
+        const withV7 = (state: Partial<AppState>): Partial<AppState> => {
+          const settings = state.settings as Partial<Settings> | undefined;
+          if (settings && 'vault' in settings) return state;
+          return {
+            ...state,
+            settings: {
+              ...defaultSettings(),
+              ...(settings ?? {}),
+              vault: null,
+            } as Settings,
+          };
+        };
         // v6 adds optional elapsedMs / sentInPlanMode on ChatMessage — additive, no transform.
-        if (fromVersion >= 6) return base as AppState;
-        if (fromVersion >= 5) return base as AppState;
-        if (fromVersion >= 4) return withV5(base) as AppState;
-        if (fromVersion >= 3) return withV5(withV4(base)) as AppState;
-        if (fromVersion >= 2) return withV5(withV4(withV2(base))) as AppState;
-        return withV5(
-          withV4(
-            withV2({
-              ...base,
-              groups: base.groups ?? {},
-              groupOrder: base.groupOrder ?? [],
-              activeGroupId: base.activeGroupId ?? null,
-              settings: defaultSettings(),
-              conversations: {},
-              policy: DEFAULT_POLICY,
-              costTracker: defaultCostTracker(),
-            }),
+        // v7 adds settings.vault = null (passphrase vault meta) — additive.
+        if (fromVersion >= 7) return base as AppState;
+        if (fromVersion >= 6) return withV7(base) as AppState;
+        if (fromVersion >= 5) return withV7(base) as AppState;
+        if (fromVersion >= 4) return withV7(withV5(base)) as AppState;
+        if (fromVersion >= 3) return withV7(withV5(withV4(base))) as AppState;
+        if (fromVersion >= 2) return withV7(withV5(withV4(withV2(base)))) as AppState;
+        return withV7(
+          withV5(
+            withV4(
+              withV2({
+                ...base,
+                groups: base.groups ?? {},
+                groupOrder: base.groupOrder ?? [],
+                activeGroupId: base.activeGroupId ?? null,
+                settings: defaultSettings(),
+                conversations: {},
+                policy: DEFAULT_POLICY,
+                costTracker: defaultCostTracker(),
+              }),
+            ),
           ),
         ) as AppState;
       },
@@ -691,6 +781,10 @@ export function useActiveConversation(groupId: string | null): Conversation {
 
 export function useSettings(): Settings {
   return useAppStore(useShallow((s) => s.settings));
+}
+
+export function useVaultUnlocked(): boolean {
+  return useAppStore((s) => s.vaultUnlocked);
 }
 
 export function usePolicy(): Policy {

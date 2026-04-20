@@ -40,6 +40,13 @@ export class TruncationError extends Error {
   }
 }
 
+export class VaultLockedError extends Error {
+  constructor(message = 'API-key vault is locked. Unlock it in Settings → Security to send.') {
+    super(message);
+    this.name = 'VaultLockedError';
+  }
+}
+
 export function isInfraError(err: unknown): err is AuthError | NetworkError | ProviderRateLimitError {
   return err instanceof AuthError || err instanceof NetworkError || err instanceof ProviderRateLimitError;
 }

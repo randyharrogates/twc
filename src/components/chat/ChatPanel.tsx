@@ -6,7 +6,9 @@ import type { AgentPhase, ChatMessage, ContentBlock, ModelId } from '../../lib/l
 import { newId } from '../../lib/id';
 import { AnthropicClient } from '../../lib/llm/anthropicClient';
 import { OpenAIClient } from '../../lib/llm/openaiClient';
-import { AuthError, NetworkError, ProviderRateLimitError, TruncationError } from '../../lib/llm/errors';
+import { AuthError, NetworkError, ProviderRateLimitError, TruncationError, VaultLockedError } from '../../lib/llm/errors';
+import { keyVault } from '../../lib/keyVault';
+import { UnlockDialog } from '../UnlockDialog';
 import { buildAgentSystemPrompt } from '../../lib/llm/prompt';
 import { preflight, estimateCostMicros } from '../../lib/llm/preflight';
 import { pruneHistory } from '../../lib/llm/conversation';
@@ -77,6 +79,7 @@ export function ChatPanel({
     turnStartedAt: number;
     phaseStartedAt: number;
   } | null>(null);
+  const [unlockPending, setUnlockPending] = useState<{ resume: () => Promise<void> } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const provider: ActiveProvider = settings.llmProvider;
@@ -185,10 +188,22 @@ export function ChatPanel({
     const turnStartedAt = performance.now();
     setPending({ text: '', phase: null, turnStartedAt, phaseStartedAt: turnStartedAt });
     try {
-      const apiKey = settings.apiKeys[provider];
-      if (!apiKey) {
+      const storedKey = settings.apiKeys[provider];
+      if (!storedKey) {
         setError(`${provider} API key is missing. Add it in Settings → Providers.`);
         return { kind: 'sent' };
+      }
+      let apiKey: string;
+      try {
+        apiKey = await keyVault.decryptKey(storedKey);
+      } catch (err) {
+        if (err instanceof VaultLockedError) {
+          setUnlockPending({
+            resume: () => runSend(blocks, options).then(() => undefined),
+          });
+          return { kind: 'deferred' };
+        }
+        throw err;
       }
       const client: AgentClient =
         provider === 'anthropic'
@@ -510,6 +525,16 @@ export function ChatPanel({
           </div>
         )}
       </div>
+      <UnlockDialog
+        open={unlockPending !== null}
+        reason="send"
+        onClose={() => setUnlockPending(null)}
+        onUnlocked={() => {
+          const resume = unlockPending?.resume;
+          setUnlockPending(null);
+          if (resume) void resume();
+        }}
+      />
     </Dialog>
   );
 }

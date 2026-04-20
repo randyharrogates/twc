@@ -61,11 +61,14 @@ export function APIKeyHelpPanel({ provider }: Props) {
           Security disclosure
         </div>
         <p className="leading-relaxed text-ink-700">
-          Your key is stored in this browser&apos;s <code>localStorage</code>. Any script running on this
-          origin — including a compromised npm dependency — could read it and use your account.
-          Only paste a key for a personal account; never share a key. Monitor your provider&apos;s usage
-          dashboard. Exports from this app redact the key, but an attacker with XSS on this origin can
-          exfiltrate it directly.
+          Your API key is stored in this browser&apos;s <code>localStorage</code> at origin
+          <code> randyharrogates.github.io</code> — an origin shared with every other GitHub
+          Pages site under this user. Without a passphrase, any of them can read your key
+          in plaintext. Set up a passphrase in the <strong>Passphrase vault</strong> section
+          above to encrypt the key at rest. The key stays stored until you clear it (red
+          button below, or DevTools → Application → Local Storage → <code>twc-v1</code>).
+          Exports from this app redact the key; the rate limiter + monthly spend cap still
+          protect you from runaway use.
         </p>
       </section>
 
