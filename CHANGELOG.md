@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-20
+
+### Added
+
+- **(security)** Session-scoped passphrase vault for API keys (`src/lib/crypto.ts`, `src/lib/keyVault.ts`). PBKDF2-SHA256 600 000 iterations, AES-GCM-256, 12-byte random IV per value, 16-byte random salt; ciphertext encoded as a tagged `enc.v1.<iv>.<ct>` string stored in place of the plaintext inside `settings.apiKeys.<provider>`. Passphrase never persisted — only salt, iteration count, and an encrypted probe live in `settings.vault`. Pattern ported from `/Users/randychan/git/Leeseidon/src/lib/storage/`.
+- **(security)** `SecurityPanel` component in `Settings → Providers` exposes setup / unlock / lock / wipe, with status badge (Unlocked / Locked / Not configured) and always-visible help block explaining the shared-origin risk on `randyharrogates.github.io` and what the vault protects against.
+- **(security)** `UnlockDialog` fires when a chat send hits a `VaultLockedError` (new error in `src/lib/llm/errors.ts`); successful unlock retries the original send once.
+- **(security)** `KeyReminderBanner` at the top of the shell is state-aware: prompts to set up a passphrase when a plaintext key is stored; offers Lock-now when the vault is unlocked; hidden when the vault is locked or no key is stored. Session-scoped dismissal via `sessionStorage['twc-key-reminder-dismissed']`.
+- **(state)** Store actions `setupVault`, `unlockVault`, `lockVault`, `wipeVault` plus reactive `vaultUnlocked` flag (non-persisted). `setApiKey` is now async and encrypts at save time when the vault is unlocked. `wipeVault` clears both the vault meta and all stored API keys.
+- **(state)** Persist version bump v6→v7; additive migration defaults `settings.vault = null`.
+- **(docs)** Top-level "Security & trust" section in `README.md` explaining the threat model, shared-origin risk, and the passphrase vault in enough depth for a non-cryptographer to decide whether to trust the site.
+- **(social)** Open Graph + Twitter Card meta tags in `index.html` + placeholder `public/og-image.png` (1200×630) for LinkedIn previews.
+- **(ci)** `.github/workflows/deploy.yml` now runs `npm run lint` and `npm run test` before `npm run build`; a failing lint or test blocks auto-deploy to GitHub Pages.
+
 ## [0.1.0] - 2026-04-19
 
 ### Added
