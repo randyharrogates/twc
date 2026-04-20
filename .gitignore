@@ -9,3 +9,4 @@ dist
 coverage
 claw-code/
 .playwright-mcp/
+.claude/

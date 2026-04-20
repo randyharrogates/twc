@@ -44,7 +44,6 @@
   - [Development](#development)
     - [Commands](#commands)
     - [Testing](#testing)
-    - [Skills](#skills)
   - [Deployment](#deployment)
   - [Contributing](#contributing)
   - [Acknowledgments](#acknowledgments)
@@ -183,7 +182,7 @@ always ends in `Math.round`. Every proportional split preserves
 ```sh
 npm install
 npm run dev        # http://localhost:5173/twc/
-npm run test       # vitest run (33 test files)
+npm run test       # vitest run (34 test files)
 npm run build      # tsc -b && vite build
 npm run lint       # eslint .
 npm run preview    # serve dist/ locally
@@ -393,13 +392,13 @@ src/
 │       └── tools/            registry, add_member, resolve_name, resolve_payer,
 │                             lookup_fx_rate, submit_drafts
 ├── state/
-│   ├── store.ts        Zustand + persist, twc-v1, version 6
+│   ├── store.ts        Zustand + persist, twc-v1, version 7
 │   └── imageCache.ts   In-memory Map — never persisted
 ├── components/
 │   ├── chat/           ChatPanel, Composer, MessageList, DraftCard, PendingBubble,
 │   │                   TokenCostBar, ToolUseBubble, slashCommands
 │   └── ui/             Button, Input, Dialog, NumberInput — zero domain knowledge
-└── test/               33 Vitest files, mirrors src/** one-to-one
+└── test/               34 Vitest files, mirrors src/** one-to-one
 ```
 
 Each subdirectory has its own `CLAUDE.md` with local rules — read the one closest to
@@ -413,7 +412,7 @@ the file you're editing.
 | -------------------- | ------------------------------------------------ |
 | `npm run dev`        | Vite dev server at `http://localhost:5173/twc/`. |
 | `npm run build`      | `tsc -b && vite build` → `dist/`.                |
-| `npm run test`       | `vitest run` (33 files, mirrors `src/**`).       |
+| `npm run test`       | `vitest run` (34 files, mirrors `src/**`).       |
 | `npm run test:watch` | Vitest in watch mode.                            |
 | `npm run test:ui`    | Vitest UI.                                       |
 | `npm run lint`       | `eslint .`                                       |
@@ -431,26 +430,6 @@ one-to-one (`lib/money.ts` → `test/money.test.ts`). Rules of thumb:
 - LLM-chat tests include at least one 0-decimal case so prompt/schema regressions
   break CI.
 - Every provider-client test asserts the API key never appears in the request body.
-
-### Skills
-
-Repo-local skills in [`.claude/skills/`](.claude/skills/):
-
-| Skill              | Use when                                                                  |
-| ------------------ | ------------------------------------------------------------------------- |
-| `qthink`           | Multi-file or invariant-touching change — deep plan-mode evaluation.      |
-| `qcode`            | TDD implementation with lint / test / build gates.                        |
-| `qcheck`           | Skeptical senior-engineer review of a non-trivial change.                 |
-| `qtest`            | Verify Vitest files mirror `src/**` under `src/test/`.                    |
-| `review-function`  | Writing-Functions checklist applied to one function.                      |
-| `review-test`      | Writing-Tests checklist applied to one test.                              |
-| `add-split-mode`   | Introducing a new `SplitMode`.                                            |
-| `add-llm-provider` | Wiring a real LLM provider behind `AgentClient`.                          |
-| `commit`           | Conventional Commits helper (never commits without explicit instruction). |
-
-Commands: [`/qpullrequest`](.claude/commands/qpullrequest.md),
-[`/qchangelog`](.claude/commands/qchangelog.md). Agent:
-[`code-quality-reviewer`](.claude/agents/code-quality-reviewer.md).
 
 ---
 
