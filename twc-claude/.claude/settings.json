@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/settings.schema.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write(./data/**)",
+      "Edit(./data/**)",
+      "Bash(npm run schema)",
+      "Bash(npm run settle:*)",
+      "Bash(npm run dev)",
+      "Bash(npm run test)",
+      "Bash(npm run build)",
+      "Bash(ls:*)",
+      "Bash(cat:*)"
+    ]
+  }
+}
