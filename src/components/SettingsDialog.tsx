@@ -468,6 +468,42 @@ function LocalProviderSection({ allowed, vaultLocked, onToggleAllowed }: LocalSe
         {baseUrlOk && (
           <div className="mt-1 text-xs text-emerald-300">URL accepted.</div>
         )}
+        {(() => {
+          const pageIsHttps = window.location.protocol === 'https:';
+          let urlProtocol: string | null = null;
+          let urlHost: string | null = null;
+          try {
+            const u = new URL(draft.baseUrl);
+            urlProtocol = u.protocol;
+            urlHost = u.hostname.toLowerCase();
+          } catch { /* invalid URL */ }
+          const urlIsHttp = urlProtocol === 'http:';
+          const urlIsHttps = urlProtocol === 'https:';
+          const isLoopback = urlHost !== null && ['localhost', '127.0.0.1', '[::1]'].includes(urlHost);
+          const isChromium = /Chrome\//.test(navigator.userAgent) && !/Firefox\//.test(navigator.userAgent);
+          if (baseUrlOk && pageIsHttps && urlIsHttp && !isChromium) {
+            return (
+              <div className="mt-1 text-xs text-amber-300">
+                Firefox/Safari block HTTP connections from HTTPS pages (mixed content). Use Chrome/Edge or run TWC locally (<code>npm run dev</code>).
+              </div>
+            );
+          }
+          if (baseUrlOk && pageIsHttps && urlIsHttp && isChromium) {
+            return (
+              <div className="mt-1 text-xs text-amber-300">
+                Chrome requires a Private Network Access preflight. Ensure Ollama &ge; 0.5 is running and <code>OLLAMA_ORIGINS</code> includes this site.
+              </div>
+            );
+          }
+          if (baseUrlOk && pageIsHttps && urlIsHttps && !isLoopback) {
+            return (
+              <div className="mt-1 text-xs text-amber-300">
+                This URL is allowed by TWC but the deployed <code>github.io</code> build&rsquo;s CSP only allows loopback (<code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code>). HTTPS tunnels work only when you self-host TWC (<code>npm run dev</code>).
+              </div>
+            );
+          }
+          return null;
+        })()}
       </div>
       <div>
         <Label htmlFor="local-model-name">Model name</Label>

@@ -601,11 +601,23 @@ export function ChatPanel({
 function formatErrorMessage(err: unknown): string {
   const suffix = (id?: string) => (id ? ` [req ${id}]` : '');
   if (err instanceof LocalEndpointUnreachableError) {
-    return (
-      'Your browser blocked the connection to your local model (mixed content or PNA). ' +
-      'Either run TWC locally (npm run dev) or use Chrome/Edge. ' +
-      'See the "Run with Ollama" section of the README.'
-    );
+    const onHttps = window.location.protocol === 'https:';
+    let urlIsHttp = false;
+    try { urlIsHttp = new URL(err.baseUrl).protocol === 'http:'; } catch { /* invalid URL */ }
+    const isChromium = /Chrome\//.test(navigator.userAgent) && !/Firefox\//.test(navigator.userAgent);
+    if (onHttps && urlIsHttp && !isChromium) {
+      return (
+        'Firefox/Safari block HTTP connections from HTTPS pages (mixed content). ' +
+        'Use Chrome/Edge or run TWC locally (npm run dev).'
+      );
+    }
+    if (onHttps && urlIsHttp) {
+      return (
+        `Chrome's Private Network Access preflight blocked ${err.baseUrl}. ` +
+        'Check that Ollama \u2265 0.5 is running and OLLAMA_ORIGINS includes this site, then restart Ollama.'
+      );
+    }
+    return `Cannot reach local model at ${err.baseUrl}. Check that your server is running.`;
   }
   if (err instanceof AuthError) return `Auth error: ${err.message}. Check your API key in Settings.${suffix(err.requestId)}`;
   if (err instanceof ProviderRateLimitError) {

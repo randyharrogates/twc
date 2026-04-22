@@ -335,10 +335,18 @@ conflict. Or put Ollama behind a local HTTPS proxy (Caddy, nginx) or expose it
 over Cloudflare Tunnel with HTTPS, then paste the `https://...` URL into
 Settings.
 
+**HTTPS tunnels (Caddy / nginx / Cloudflare Tunnel) only work when running
+TWC locally.** The deployed `github.io` build's CSP only permits `connect-src`
+to loopback addresses and the two BYO-key providers (Anthropic, OpenAI).
+Pointing at `https://your-tunnel.example.com` from the deployed URL will be
+blocked by CSP. Run `npm run dev` (or fork and ship your own CSP) to use an
+HTTPS local endpoint.
+
 ### Troubleshooting
 
 | Symptom                                     | Likely cause                                                                                  |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| DevTools console: *Refused to connect … violates Content Security Policy* | The TWC bundle in your browser pre-dates the CSP update. Hard-reload the page (`⌘⇧R` / `Ctrl+Shift+R`) to pick up the new build, or check that your Base URL is `http://localhost`, `127.0.0.1`, or `[::1]` — custom hosts aren't allowed by TWC's CSP. |
 | `LocalEndpointUnreachableError` toast        | Mixed content. See the table above.                                                           |
 | `403 Forbidden` from the server             | `OLLAMA_ORIGINS` (or LM Studio's CORS list) doesn't include TWC's origin.                     |
 | `Parse error` toast on every turn           | The model isn't honoring the tool schema. Try `qwen2.5-vl:7b` or a larger model.              |
