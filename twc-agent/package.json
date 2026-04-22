@@ -1,10 +1,10 @@
 {
-  "name": "twc-claude",
+  "name": "twc-agent",
   "private": true,
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
-  "description": "Local-only group-expense splitter. Claude Code is the input surface; the Vite app is the viewer.",
+  "description": "Local-only group-expense splitter. Run Claude Code from inside this folder — its cwd sandbox keeps it from touching the parent TWC repo. The Vite app is the viewer.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

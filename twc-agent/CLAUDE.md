@@ -1,11 +1,23 @@
-# twc-claude
+# twc-agent
 
-Local-only, single-user group-expense splitter. State lives in
+Local-only, single-user group-expense splitter that **lives inside the
+TWC repo** as a sibling to the deployed-app source. State lives in
 `data/groups/*.json`. There is no backend. There is no in-browser LLM.
 
 **You (Claude Code) are the write path.** The Vite app is a viewer with
 a few light edit forms. The user interacts with you in the terminal to
 add expenses, import receipts, and settle up.
+
+## Cwd sandbox — stay inside twc-agent/
+
+The user starts Claude Code with `cd twc-agent && claude` on purpose:
+your cwd is this folder, and you should **not** leave it. Do not `cd
+..`, do not `Read`/`Edit`/`Write` any path starting with `../`, do not
+reference `../src/**`. The parent TWC at `../` is a separate project
+(deployed app, BYO-key chat) and is off-limits.
+
+If a task seems to require touching the parent TWC, stop and ask the
+user — don't do it silently.
 
 ## Money invariants (non-negotiable)
 
@@ -38,21 +50,21 @@ add expenses, import receipts, and settle up.
 - **For splits and settlement, shell out**: `npm run settle -- <id>`.
   The script validates, computes, and writes in one atomic step. Do not
   compute balances by hand — you will get them subtly wrong.
-- **Pretty-print JSON** (2-space indent, trailing newline) on every write
-  so diffs stay readable.
+- **Pretty-print JSON** (2-space indent, trailing newline) on every
+  write so diffs stay readable.
 
 ## Interactive Q&A
 
-Terminal questions replace the old TWC's LLM tools (`resolve_name`,
+Terminal questions replace the parent TWC's LLM tools (`resolve_name`,
 `resolve_payer`, `lookup_fx_rate`). When in doubt:
 
 - **Ambiguous member name** → list candidates (name + id suffix), ask.
 - **Missing FX rate** → use `group.rateHints[<code>]` if present;
-  otherwise ask the user ("1 USD = ? JPY"). Store the new rate back into
-  `rateHints` so the next expense has a default.
+  otherwise ask the user ("1 USD = ? JPY"). Store the new rate back
+  into `rateHints` so the next expense has a default.
 - **Unsure of payer** → ask.
-- **Vision receipt confirmation** → state the parsed total and currency,
-  wait for yes/no. `¥1200` vs `¥12,000` is the common failure.
+- **Vision receipt confirmation** → state the parsed total and
+  currency, wait for yes/no. `¥1200` vs `¥12,000` is the common failure.
 
 **Never guess silently** on numeric values.
 
@@ -69,8 +81,8 @@ Suggest them to the user when relevant.
 ## Workflow tutorial (same as README)
 
 ```
-# 1. Start Claude Code in twc-claude/
-cd twc-claude && claude
+# 1. Start Claude Code in twc-agent/ (cwd = sandbox)
+cd twc-agent && claude
 
 # 2. Create a group
 /twc-new-group "Tokyo trip" JPY Alice Bob Carol
@@ -93,7 +105,7 @@ npm run dev     # http://localhost:5173
 ## Layout
 
 ```
-twc-claude/
+twc-agent/
 ├── .claude/              ← skill + slash commands + settings (this dir)
 ├── data/
 │   ├── groups/           ← one file per group (source of truth)
@@ -113,6 +125,9 @@ twc-claude/
 
 ## Things NOT to do
 
+- **Do not leave twc-agent/.** No `Read`, `Edit`, `Write`, `Bash(cd
+  ..)`, or `Bash(ls ../)` touching the parent TWC. If a task seems to
+  need it, stop and ask.
 - **Do not add in-browser LLM features.** No `fetch` to Anthropic or
   OpenAI from the frontend. No API keys. If you're tempted, stop — the
   parent TWC at `../` already has that, and this project exists to be
@@ -123,8 +138,5 @@ twc-claude/
 - **Do not hardcode currency codes, symbols, or decimals.** Read from
   `src/lib/currency.ts` (`CURRENCIES`, `CurrencyCode`,
   `minorDecimals()`).
-- **Do not introduce floats for money outside the FX-conversion boundary**
-  in `src/lib/currency.ts:convertMinor`.
-- **Do not modify files in the parent TWC repo** (`../src`, `../data`,
-  anything at `../*`). This project is meant to be extractable via
-  `git subtree split --prefix=twc-claude`.
+- **Do not introduce floats for money outside the FX-conversion
+  boundary** in `src/lib/currency.ts:convertMinor`.

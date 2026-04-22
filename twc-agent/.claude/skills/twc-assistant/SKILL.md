@@ -5,9 +5,13 @@ description: Read, mutate, and write group-expense JSON files under data/groups/
 
 # twc-assistant
 
-TWC-Claude stores one group per JSON file under `data/groups/<groupId>.json`.
+TWC-Agent stores one group per JSON file under `data/groups/<groupId>.json`.
 This skill teaches Claude Code how to read, mutate, and write those files
 safely.
+
+**Cwd sandbox.** Your cwd is `twc-agent/` inside the larger TWC repo. Do
+not leave it: no `Read`/`Edit`/`Write`/`Bash` against `../*` or anything
+outside this folder. If a task seems to need it, ask the user.
 
 ## Invariants (non-negotiable)
 

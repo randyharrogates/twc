@@ -1,23 +1,43 @@
-# twc-claude
+# twc-agent
 
-A local-only, single-user fork of [TWC](../) (the group-expense splitter)
-where **Claude Code is the input surface** and the Vite app is the viewer.
+A local-only, single-user fork of [TWC](../) (the group-expense
+splitter), living permanently inside the TWC repo as a sibling to
+`src/`. Instead of an in-browser chat, **Claude Code is the input
+surface**, driven from inside this folder. The Vite app is the viewer.
 
-Not a deployable web app. Nothing is hosted. All state lives as JSON on
-your filesystem at `data/groups/*.json`.
+## How it's used (important)
+
+**Run Claude Code from inside `twc-agent/`, not from the TWC repo
+root:**
+
+```
+cd twc-agent
+claude
+```
+
+Why: Claude Code treats the current working directory as its project
+root. Starting it here sandboxes it to `twc-agent/` — it can read, edit,
+and write JSON files under `data/groups/`, but it can't touch anything
+else in the parent TWC (`../src`, `../vite.config.ts`, the deployed app,
+etc.). The sandbox is cwd-based, not permission-based, so don't `cd ..`
+mid-session.
+
+Side-effect: the slash commands (`/twc-new-group`, `/twc-add-expense`,
+`/twc-import-receipt`, `/twc-settle`) are only available from this cwd —
+they live at `twc-agent/.claude/commands/`.
 
 ## What this is
 
-- **You add expenses in Claude Code**, not in the browser. Claude uses its
-  native `Read` / `Edit` / `Write` / vision tools to mutate the JSON
+- **You add expenses in Claude Code**, not in the browser. Claude uses
+  its native `Read` / `Edit` / `Write` / vision tools to mutate the JSON
   files, and asks you questions in the terminal (payer, FX rate, split
   mode) instead of through a web UI.
 - **The Vite app is a read-only-ish viewer** with a few light edit forms
   (rename a member, tweak a split). It reads `data/groups/*.json` via a
   tiny dev-server middleware and renders balances + a settlement.
-- **No API keys anywhere.** Claude Code uses your Pro / Max subscription.
-  The heavy BYO-key chat loop from the parent TWC is intentionally
-  absent.
+- **No API keys anywhere.** Claude Code uses your Pro / Max
+  subscription. The heavy BYO-key chat loop from the parent TWC is
+  intentionally absent.
 
 ## Prerequisites
 
@@ -29,32 +49,23 @@ your filesystem at `data/groups/*.json`.
 
 ## Install
 
-This project lives inside the outer TWC repo at `twc-claude/`. It is
-fully self-contained — its own `package.json`, `node_modules`, `.claude/`
-skill and commands, no imports across the boundary. When you're ready to
-ship it as its own repo:
-
 ```
-# from the outer TWC repo root
-git subtree split --prefix=twc-claude -b twc-claude-export
-# then push that branch to a new remote
-```
-
-Until then, install and run in place:
-
-```
-cd twc-claude
+cd twc-agent
 npm install
 npm run schema          # generates data/.schema/group.json
 ```
+
+This project is self-contained: its own `package.json`, `node_modules`,
+`.claude/` skill and commands; no imports across the `twc-agent/`
+boundary into the parent TWC.
 
 ## The workflow
 
 The end-to-end flow from empty to a rendered, settled group:
 
 ```
-# 1. Start Claude Code in the twc-claude subfolder
-cd twc-claude && claude
+# 1. Start Claude Code in the twc-agent subfolder
+cd twc-agent && claude
 
 # 2. Create a group (in the Claude Code prompt)
 /twc-new-group "Tokyo trip" JPY Alice Bob Carol
@@ -70,7 +81,7 @@ cd twc-claude && claude
 # Claude asks for description, amount, currency, payer, split mode.
 
 # 5. View the result in the browser (keep Claude Code running — fine
-#    to have both open):
+#    to have both open in separate terminals):
 npm run dev
 # open http://localhost:5173
 
@@ -86,7 +97,7 @@ npm run dev
 ## Where state lives
 
 - `data/groups/<groupId>.json` — one file per group. Tracked or
-  .gitignored, your call (see `.gitignore`).
+  `.gitignored`, your call (see `.gitignore`).
 - `data/receipts/<uuid>.<ext>` — receipt originals, referenced by
   `expense.receiptRef`.
 - `data/.schema/group.json` — generated JSON-Schema. Regenerate with
@@ -98,8 +109,8 @@ Ported from the parent TWC, non-negotiable:
 
 - **Integer minor units** inside a single currency (JPY ¥1200 →
   `amountMinor: 1200`; USD $12.50 → `amountMinor: 1250`). Floats only
-  cross `src/lib/currency.ts` at the FX-conversion boundary, always ending
-  in `Math.round`.
+  cross `src/lib/currency.ts` at the FX-conversion boundary, always
+  ending in `Math.round`.
 - **9-currency allow-list**: `SGD MYR USD KRW JPY TWD EUR GBP THB`.
 - **Σ shares === amountMinor** in the expense's own currency.
 - **Σ balances === 0** in base-currency minor units. The frontend fails
@@ -107,9 +118,9 @@ Ported from the parent TWC, non-negotiable:
 
 ## Troubleshooting
 
-- *Claude wrote a float for `amountMinor`* — the frontend will show a red
-  banner with the validation error. Re-run the command in Claude Code and
-  say "use integer minor units" — or hand-edit the JSON.
+- *Claude wrote a float for `amountMinor`* — the frontend will show a
+  red banner with the validation error. Re-run the command in Claude
+  Code and say "use integer minor units" — or hand-edit the JSON.
 - *Frontend won't save my edit* — optimistic-concurrency conflict.
   Reload the page to pick up Claude Code's most recent write, then
   re-apply your edit.
@@ -118,6 +129,9 @@ Ported from the parent TWC, non-negotiable:
 - *`npm run settle` throws "balances must sum to 0"* — that means a
   rounding bug upstream, usually a wrong `rateToBase`. Ask Claude to
   re-inspect the suspect expense; do not hand-patch balances.
+- *Claude tried to touch files in the parent TWC* — you started Claude
+  Code from the wrong directory. Exit, `cd twc-agent`, and run `claude`
+  again.
 
 ## Commands
 
@@ -134,5 +148,5 @@ npm run lint        # ESLint
 
 - Not a web app to share with non-technical friends.
 - Not a hosted service — everything is your filesystem.
-- Not a Claude Code replacement for the parent TWC at [../](../), which
-  is still maintained and has a BYO-key in-browser chat.
+- Not a replacement for the parent TWC at [../](../), which is the
+  deployed, BYO-key, in-browser chat version.

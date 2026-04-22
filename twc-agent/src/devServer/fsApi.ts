@@ -19,7 +19,7 @@ import { GroupSchema } from '../lib/schema';
  */
 export function fsApiPlugin(): Plugin {
   return {
-    name: 'twc-claude:fs-api',
+    name: 'twc-agent:fs-api',
     apply: 'serve',
     configureServer(server: ViteDevServer) {
       const dataRoot = resolve(server.config.root, 'data');

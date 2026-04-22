@@ -11,7 +11,7 @@ Steps:
    ```
    npm run settle -- $ARGUMENTS
    ```
-   from the `twc-claude/` directory.
+   from the `twc-agent/` directory (which is your cwd; do not `cd`).
 
 2. Report the script's output verbatim to the user — it prints each
    `from → to: amount` transfer and the new file version.
