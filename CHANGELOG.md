@@ -5,6 +5,133 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-22
+
+### Added
+
+- **(llm)** `'local'` provider — point TWC at any OpenAI-compatible
+  `/v1/chat/completions` endpoint you run yourself (Ollama, LM Studio, vLLM,
+  llama.cpp server). Receipts, chats, and tool calls stay on the user's
+  machine; no third-party billing relationship. New
+  [`src/lib/llm/localClient.ts`](src/lib/llm/localClient.ts) wraps the shared
+  primitive, validates the user-supplied Base URL against an HTTPS-or-loopback
+  allow-list at construction (load-bearing — not just a UI hint), and maps
+  generic browser "Failed to fetch" errors to a named
+  `LocalEndpointUnreachableError` that the chat surface translates into the
+  README's mixed-content / PNA / CORS troubleshooting.
+- **(llm)** `OpenAICompatClient` extracted from the existing `OpenAIClient`
+  ([`src/lib/llm/openaiCompatClient.ts`](src/lib/llm/openaiCompatClient.ts)).
+  Accepts `{ baseUrl, apiKey?, apiModelName?, providerLabel? }`; the
+  `apiModelName` override forwards the user-supplied wire tag (e.g.
+  `qwen2.5-vl:7b`) in `body.model` while `req.model` keeps driving
+  `getModel()` lookups for cap, pricing, and reasoning kind. When `apiKey` is
+  blank the `Authorization` header is omitted entirely (no `Bearer ` on an
+  empty value).
+- **(llm)** `LocalEndpointUnreachableError extends NetworkError` in
+  `errors.ts` — a named subtype so existing infra-error handlers still treat
+  it as a network failure, while the chat panel can recognise the
+  mixed-content / PNA / refused-connection family and link to the
+  Run-with-Ollama section of the README instead of a generic toast.
+- **(llm)** `'local'` model entry in `models.ts` with a runtime cache
+  (`setLocalModelRuntime` / `resetLocalModelRuntime`) — `MODELS.local` is
+  exposed via `Object.defineProperty(..., { get })` so `contextWindowTokens`,
+  `maxOutputTokens`, and `supportsVision` always reflect the user's settings.
+  Zero µUSD prices; `reasoningKind: 'none'`; sentinel
+  `lastVerifiedIso: '9999-12-31'` is excluded from the year-staleness CI test.
+- **(state)** `settings.localModel` shape (Base URL, model name, context
+  window, max output tokens, vision flag) plus `setLocalModel` action with
+  defensive URL allow-list re-check. `apiKeys.local` is optional and bypasses
+  the vault encrypt/unlock pipeline when blank — there is nothing to protect
+  unless the user voluntarily configures a key.
+- **(state)** Persist version bump v7→v8; additive `withV8` migration sets
+  `settings.localModel = defaultLocalModel()` and
+  `policy.imageConsentByProvider.local = false` for existing users with no
+  data loss.
+- **(ui)** Settings → Providers → **Local** section
+  ([`SettingsDialog.tsx`](src/components/SettingsDialog.tsx)) — collapsible
+  panel with Base URL (inline allow-list validation showing exact rejection
+  reason), model name, context window, max output, vision toggle, optional
+  API key field, save button, and an inline expanded-by-default Security
+  notes panel summarising the five risks. The Active-provider dropdown gains
+  a `Local (Ollama / LM Studio / llama.cpp)` option; image consent in the
+  Policy tab gains a Local row with bespoke "your configured server" copy.
+- **(chat)** Three-way client construction in
+  [`ChatPanel.tsx`](src/components/chat/ChatPanel.tsx) —
+  `AnthropicClient` / `OpenAIClient` / `LocalClient`. A `useEffect` mirrors
+  `settings.localModel` capacity into the library-side runtime cache via
+  `setLocalModelRuntime(...)` so `getModel('local')` resolves the user's
+  values without a render loop. The error formatter now maps
+  `LocalEndpointUnreachableError` to a README-pointing toast; the
+  key-missing banner reads "Local provider not configured" with a link
+  straight to Settings.
+- **(chat)** `ChatToolbar` model picker grows a third **Local** section,
+  takes a new `localConfigured` prop so the per-row "missing" badge can read
+  "no API key" or "not configured" appropriately. `ConsentDialog` extended
+  with a `local` consent screen that names the user's configured Base URL
+  rather than a third party. `slashCommands.ts` gains a `localConfigured`
+  dep and routes `/model local` correctly.
+- **(chat)** Cost chip in `TokenCostBar` swaps to `$0.00 (local)` when the
+  active provider is `'local'` so the rolling-dollar UI doesn't imply a
+  charge that never happens.
+- **(test)** New
+  [`src/test/llm/openaiCompatClient.test.ts`](src/test/llm/openaiCompatClient.test.ts)
+  ports the OpenAI client tests verbatim to the extracted primitive and adds
+  pinned coverage for the `apiModelName` override and the blank-key
+  no-`Authorization` invariant. New
+  [`src/test/llm/localClient.test.ts`](src/test/llm/localClient.test.ts)
+  pins the URL allow-list (HTTPS, `localhost`, `127.0.0.1`, `[::1]`
+  accepted; `http://evil.com`, `http://192.168.1.1`, `file://`, `ftp://`,
+  `javascript:` rejected), Authorization-header-omitted-when-blank,
+  key-never-in-body, the `LocalEndpointUnreachableError` mapping for
+  "Failed to fetch", AbortError pass-through, and a JPY 0-decimal
+  round-trip via the runtime cache.
+
+### Changed
+
+- **(llm)** `OpenAIClient` shrunk to a thin preset around
+  `OpenAICompatClient` — required `apiKey`, fixed
+  `https://api.openai.com/v1/chat/completions` base URL,
+  `providerLabel: 'openai'`. All transport, error mapping, streaming, and
+  reasoning-model behaviour now lives in the shared primitive. The public
+  constructor surface and behaviour are unchanged.
+- **(llm)** `Provider` widened from `'anthropic' | 'openai'` to
+  `'anthropic' | 'openai' | 'local'`. `imageConsentByProvider` gains a
+  `local: boolean` slot; `Settings.llmProvider` and `apiKeys` widen
+  accordingly. Cascade tracked through `ChatPanel`, `ChatToolbar`,
+  `SettingsDialog`, `ConsentDialog`, `slashCommands`, store types, and
+  policy types.
+- **(llm)** `Model.supportsVision` typed as `boolean` instead of literal
+  `true` so the local entry can declare itself text-only by default.
+- **(ui)** `APIKeyHelpPanel` typed as `RemoteProvider = Exclude<Provider,
+  'local'>`; local users configure their own server and don't need a
+  third-party "create a key" walkthrough.
+- **(docs)** New top-level **Run with Ollama (local model)** section in the
+  README between Architecture and Quick start: rationale, Ollama install
+  (with the `≥ 0.5` PNA-preflight requirement called out), three
+  recommended vision models with `ollama pull` commands, exact
+  `OLLAMA_ORIGINS` blocks for the `npm run dev` and published-URL cases
+  with a bold warning against `OLLAMA_ORIGINS=*`, step-by-step TWC config
+  walkthrough, browser-compatibility table (Chrome / Firefox / Safari ×
+  github.io / localhost), troubleshooting table, and a six-item Security
+  section that pairs each risk with a concrete user action.
+- **(docs)** README LLM-providers table gains a Local row; mermaid
+  architecture diagram adds the `LocalClient` branch; ToC entry added.
+- **(docs)** Root `CLAUDE.md` provider one-liner widened, BYO-server line
+  added, Stack note for local models, `OpenAICompatClient` primitive
+  call-out, vault-paragraph addendum for `apiKeys.local`. Subdirectory
+  rulebooks updated: `src/lib/llm/CLAUDE.md` documents the
+  `OpenAICompatClient` primitive, `LocalClient` URL allow-list as
+  load-bearing, the `LocalEndpointUnreachableError` mixed-content signal,
+  and `getModel('local')` runtime-cache semantics; `src/state/CLAUDE.md`
+  bumps the persist-version line to 8 and documents the `localModel` shape
+  and the optional `apiKeys.local` vault-skip; `src/components/CLAUDE.md`
+  adds a "three-way provider branching — don't two-way this anymore"
+  section.
+- **(docs)** `add-llm-provider` skill gains an OpenAI-compat preset
+  section telling future contributors to wrap `OpenAICompatClient` instead
+  of hand-rolling a new client when the provider speaks
+  OpenAI-compatible chat-completions.
+
 ## [0.2.0] - 2026-04-20
 
 ### Added

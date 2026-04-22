@@ -20,6 +20,7 @@ import type {
 import { dayKey, monthKey, usageToMicroUsd } from '../lib/llm/cost';
 import { getModel } from '../lib/llm/models';
 import { DEFAULT_POLICY, type Policy, type Provider } from '../lib/policy';
+import { isAllowedLocalBaseUrl } from '../lib/llm/localClient';
 import {
   DEFAULT_LIMITS,
   checkAndConsume,
@@ -42,9 +43,17 @@ export interface ExpenseInput {
   split: SplitEntry[];
 }
 
+export interface LocalModelSettings {
+  baseUrl: string;
+  modelName: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  supportsVision: boolean;
+}
+
 export interface Settings {
-  llmProvider: 'anthropic' | 'openai';
-  apiKeys: { anthropic?: string; openai?: string };
+  llmProvider: Provider;
+  apiKeys: { anthropic?: string; openai?: string; local?: string };
   modelOverride: ModelId | null;
   reasoningEffort: ReasoningEffort;
   planMode: boolean;
@@ -52,6 +61,7 @@ export interface Settings {
   rateLimits: RateLimits;
   retryConfig: { maxRetries: number; baseDelayMs: number };
   vault: VaultMeta | null;
+  localModel: LocalModelSettings;
 }
 
 export interface Conversation {
@@ -103,9 +113,10 @@ export interface AppState {
   updateExpense: (groupId: string, expenseId: string, input: ExpenseInput) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
 
-  setLLMProvider: (provider: 'anthropic' | 'openai') => void;
-  setApiKey: (provider: 'anthropic' | 'openai', key: string) => Promise<void>;
-  clearApiKey: (provider: 'anthropic' | 'openai') => void;
+  setLLMProvider: (provider: Provider) => void;
+  setApiKey: (provider: Provider, key: string) => Promise<void>;
+  clearApiKey: (provider: Provider) => void;
+  setLocalModel: (settings: LocalModelSettings) => void;
   setupVault: (passphrase: string) => Promise<void>;
   unlockVault: (passphrase: string) => Promise<void>;
   lockVault: () => void;
@@ -137,6 +148,16 @@ export interface AppState {
   exportState: () => string;
 }
 
+export function defaultLocalModel(): LocalModelSettings {
+  return {
+    baseUrl: '',
+    modelName: '',
+    contextWindowTokens: 32_768,
+    maxOutputTokens: 4_096,
+    supportsVision: false,
+  };
+}
+
 function defaultSettings(): Settings {
   return {
     llmProvider: 'openai',
@@ -148,6 +169,7 @@ function defaultSettings(): Settings {
     rateLimits: DEFAULT_LIMITS,
     retryConfig: { maxRetries: 3, baseDelayMs: 500 },
     vault: null,
+    localModel: defaultLocalModel(),
   };
 }
 
@@ -183,7 +205,7 @@ function memberReferenceCount(group: Group, memberId: string): number {
 }
 
 function redactKeys(settings: Settings): Settings {
-  return { ...settings, apiKeys: { anthropic: '', openai: '' } };
+  return { ...settings, apiKeys: { anthropic: '', openai: '', local: '' } };
 }
 
 function collectImageIds(conversation: Conversation | undefined): string[] {
@@ -437,7 +459,7 @@ export const useAppStore = create<AppState>()(
         const { meta } = await keyVault.setup(passphrase);
         const existing = get().settings.apiKeys;
         const reencrypted: Settings['apiKeys'] = {};
-        for (const p of ['anthropic', 'openai'] as const) {
+        for (const p of ['anthropic', 'openai', 'local'] as const) {
           const v = existing[p];
           if (!v || v.length === 0) continue;
           reencrypted[p] = isEncrypted(v) ? v : await keyVault.encryptKey(v);
@@ -445,6 +467,23 @@ export const useAppStore = create<AppState>()(
         set((s) => ({
           vaultUnlocked: true,
           settings: { ...s.settings, vault: meta, apiKeys: reencrypted },
+        }));
+      },
+
+      setLocalModel: (settings) => {
+        if (settings.baseUrl.length > 0 && !isAllowedLocalBaseUrl(settings.baseUrl)) {
+          throw new Error(
+            `Base URL "${settings.baseUrl}" is not allowed. Only HTTPS URLs or http://localhost, http://127.0.0.1, http://[::1] may be used.`,
+          );
+        }
+        if (!Number.isFinite(settings.contextWindowTokens) || settings.contextWindowTokens < 1024) {
+          throw new Error('Context window must be at least 1024 tokens.');
+        }
+        if (!Number.isFinite(settings.maxOutputTokens) || settings.maxOutputTokens < 256) {
+          throw new Error('Max output tokens must be at least 256.');
+        }
+        set((s) => ({
+          settings: { ...s.settings, localModel: { ...settings } },
         }));
       },
 
@@ -466,7 +505,7 @@ export const useAppStore = create<AppState>()(
         keyVault.wipe();
         set((s) => ({
           vaultUnlocked: false,
-          settings: { ...s.settings, vault: null, apiKeys: {} },
+          settings: { ...s.settings, vault: null, apiKeys: {} as Settings['apiKeys'] },
         }));
       },
 
@@ -665,7 +704,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'twc-v1',
-      version: 7,
+      version: 8,
       partialize: (s) => ({
         groups: s.groups,
         groupOrder: s.groupOrder,
@@ -726,27 +765,59 @@ export const useAppStore = create<AppState>()(
             } as Settings,
           };
         };
+        const withV8 = (state: Partial<AppState>): Partial<AppState> => {
+          const settings = state.settings as Partial<Settings> | undefined;
+          const policy = state.policy as Partial<Policy> | undefined;
+          const policyUpdate =
+            policy && policy.imageConsentByProvider && 'local' in policy.imageConsentByProvider
+              ? policy
+              : {
+                  ...DEFAULT_POLICY,
+                  ...(policy ?? {}),
+                  imageConsentByProvider: {
+                    anthropic: policy?.imageConsentByProvider?.anthropic ?? false,
+                    openai: policy?.imageConsentByProvider?.openai ?? false,
+                    local: false,
+                  },
+                };
+          if (settings && 'localModel' in settings) {
+            return { ...state, policy: policyUpdate as Policy };
+          }
+          return {
+            ...state,
+            policy: policyUpdate as Policy,
+            settings: {
+              ...defaultSettings(),
+              ...(settings ?? {}),
+              localModel: defaultLocalModel(),
+            } as Settings,
+          };
+        };
         // v6 adds optional elapsedMs / sentInPlanMode on ChatMessage — additive, no transform.
         // v7 adds settings.vault = null (passphrase vault meta) — additive.
-        if (fromVersion >= 7) return base as AppState;
-        if (fromVersion >= 6) return withV7(base) as AppState;
-        if (fromVersion >= 5) return withV7(base) as AppState;
-        if (fromVersion >= 4) return withV7(withV5(base)) as AppState;
-        if (fromVersion >= 3) return withV7(withV5(withV4(base))) as AppState;
-        if (fromVersion >= 2) return withV7(withV5(withV4(withV2(base)))) as AppState;
-        return withV7(
-          withV5(
-            withV4(
-              withV2({
-                ...base,
-                groups: base.groups ?? {},
-                groupOrder: base.groupOrder ?? [],
-                activeGroupId: base.activeGroupId ?? null,
-                settings: defaultSettings(),
-                conversations: {},
-                policy: DEFAULT_POLICY,
-                costTracker: defaultCostTracker(),
-              }),
+        // v8 adds settings.localModel + policy.imageConsentByProvider.local — additive.
+        if (fromVersion >= 8) return base as AppState;
+        if (fromVersion >= 7) return withV8(base) as AppState;
+        if (fromVersion >= 6) return withV8(withV7(base)) as AppState;
+        if (fromVersion >= 5) return withV8(withV7(base)) as AppState;
+        if (fromVersion >= 4) return withV8(withV7(withV5(base))) as AppState;
+        if (fromVersion >= 3) return withV8(withV7(withV5(withV4(base)))) as AppState;
+        if (fromVersion >= 2) return withV8(withV7(withV5(withV4(withV2(base))))) as AppState;
+        return withV8(
+          withV7(
+            withV5(
+              withV4(
+                withV2({
+                  ...base,
+                  groups: base.groups ?? {},
+                  groupOrder: base.groupOrder ?? [],
+                  activeGroupId: base.activeGroupId ?? null,
+                  settings: defaultSettings(),
+                  conversations: {},
+                  policy: DEFAULT_POLICY,
+                  costTracker: defaultCostTracker(),
+                }),
+              ),
             ),
           ),
         ) as AppState;

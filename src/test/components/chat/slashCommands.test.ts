@@ -7,6 +7,7 @@ function deps(overrides: Partial<Parameters<typeof dispatchSlashCommand>[1]> = {
     currentModelId: 'gpt-5-mini' as ModelId,
     planMode: false,
     apiKeys: { anthropic: 'sk-ant-x', openai: 'sk-x' },
+    localConfigured: false,
     setModelOverride: vi.fn(),
     setLLMProvider: vi.fn(),
     setPlanMode: vi.fn(),

@@ -16,6 +16,18 @@ export class NetworkError extends Error {
   }
 }
 
+// Mixed-content / DNS / connection-refused / browser-PNA-block surfaced as "Failed to
+// fetch" — we cannot tell the failure modes apart from the browser, so collapse them
+// into a named subtype that the UI can map to the README's Run-with-Ollama section.
+export class LocalEndpointUnreachableError extends NetworkError {
+  readonly baseUrl: string;
+  constructor(baseUrl: string, message = 'Browser blocked the connection (mixed content or PNA).') {
+    super('local', `${message} URL: ${baseUrl}`);
+    this.name = 'LocalEndpointUnreachableError';
+    this.baseUrl = baseUrl;
+  }
+}
+
 export class ProviderRateLimitError extends Error {
   readonly retryAfterMs: number;
   readonly requestId?: string;

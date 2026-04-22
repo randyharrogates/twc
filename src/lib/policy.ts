@@ -1,13 +1,13 @@
 import type { ModelId, TokenUsage } from './llm/types';
 import { dayKey, monthKey } from './llm/cost';
 
-export type Provider = 'anthropic' | 'openai';
+export type Provider = 'anthropic' | 'openai' | 'local';
 
 export interface Policy {
   allowedProviders: Provider[];
   dailyCapUsdMicros: number;
   monthlyCapUsdMicros: number;
-  imageConsentByProvider: { anthropic: boolean; openai: boolean };
+  imageConsentByProvider: { anthropic: boolean; openai: boolean; local: boolean };
   persistHistory: boolean;
 }
 
@@ -27,7 +27,7 @@ export const DEFAULT_POLICY: Policy = {
   allowedProviders: [],
   dailyCapUsdMicros: 5_000_000,
   monthlyCapUsdMicros: 50_000_000,
-  imageConsentByProvider: { anthropic: false, openai: false },
+  imageConsentByProvider: { anthropic: false, openai: false, local: false },
   persistHistory: true,
 };
 

@@ -1,14 +1,22 @@
 import { MODELS, isModelId } from '../../lib/llm/models';
 import type { ModelId } from '../../lib/llm/types';
+import type { Provider } from '../../lib/policy';
 
 export interface SlashDeps {
   currentModelId: ModelId;
   planMode: boolean;
-  apiKeys: { anthropic?: string; openai?: string };
+  apiKeys: { anthropic?: string; openai?: string; local?: string };
+  localConfigured: boolean;
   setModelOverride: (id: ModelId | null) => void;
-  setLLMProvider: (provider: 'anthropic' | 'openai') => void;
+  setLLMProvider: (provider: Provider) => void;
   setPlanMode: (v: boolean) => void;
 }
+
+const PROVIDER_LABEL: Record<Provider, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  local: 'Local',
+};
 
 export type SlashResult =
   | { handled: false }
@@ -71,13 +79,21 @@ function handleModel(arg: string, deps: SlashDeps): SlashResult {
   const meta = MODELS[arg];
   deps.setModelOverride(arg);
   deps.setLLMProvider(meta.provider);
-  const providerLabel = meta.provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
-  const keyMissing = !deps.apiKeys[meta.provider];
+  const providerLabel = PROVIDER_LABEL[meta.provider];
+  const isLocal = meta.provider === 'local';
+  const missing = isLocal ? !deps.localConfigured : !deps.apiKeys[meta.provider];
+  if (!missing) {
+    return {
+      handled: true,
+      kind: 'success',
+      message: `Switched to ${meta.displayName} (${providerLabel}).`,
+    };
+  }
   return {
     handled: true,
     kind: 'success',
-    message: keyMissing
-      ? `Switched to ${meta.displayName} (${providerLabel}) — add an API key in Settings to send.`
-      : `Switched to ${meta.displayName} (${providerLabel}).`,
+    message: isLocal
+      ? `Switched to ${meta.displayName} (Local) — set the Base URL and model name in Settings to send.`
+      : `Switched to ${meta.displayName} (${providerLabel}) — add an API key in Settings to send.`,
   };
 }

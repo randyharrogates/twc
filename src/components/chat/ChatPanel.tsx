@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CurrencyCode, Group, Member } from '../../types';
 import type { AgentClient } from '../../lib/llm/agent';
 import { runTurn } from '../../lib/llm/agent';
@@ -6,14 +6,22 @@ import type { AgentPhase, ChatMessage, ContentBlock, ModelId } from '../../lib/l
 import { newId } from '../../lib/id';
 import { AnthropicClient } from '../../lib/llm/anthropicClient';
 import { OpenAIClient } from '../../lib/llm/openaiClient';
-import { AuthError, NetworkError, ProviderRateLimitError, TruncationError, VaultLockedError } from '../../lib/llm/errors';
+import { LocalClient } from '../../lib/llm/localClient';
+import {
+  AuthError,
+  LocalEndpointUnreachableError,
+  NetworkError,
+  ProviderRateLimitError,
+  TruncationError,
+  VaultLockedError,
+} from '../../lib/llm/errors';
 import { keyVault } from '../../lib/keyVault';
 import { UnlockDialog } from '../UnlockDialog';
 import { buildAgentSystemPrompt } from '../../lib/llm/prompt';
 import { preflight, estimateCostMicros } from '../../lib/llm/preflight';
 import { pruneHistory } from '../../lib/llm/conversation';
-import { getModel, MODELS, DEFAULT_MODEL_ID } from '../../lib/llm/models';
-import { evaluatePolicy } from '../../lib/policy';
+import { getModel, MODELS, DEFAULT_MODEL_ID, setLocalModelRuntime } from '../../lib/llm/models';
+import { evaluatePolicy, type Provider } from '../../lib/policy';
 import { usageToMicroUsd } from '../../lib/llm/cost';
 import { createAgentExecutor, primaryToolSpecs } from '../../lib/llm/tools/registry';
 import { parseSubmitDraftsContent, SUBMIT_DRAFTS_TOOL_NAME } from '../../lib/llm/tools/submit_drafts';
@@ -36,7 +44,7 @@ interface Props {
   group: Group;
   open: boolean;
   onClose: () => void;
-  onConsentNeeded: (provider: 'anthropic' | 'openai', resume: () => Promise<void>) => void;
+  onConsentNeeded: (provider: Provider, resume: () => Promise<void>) => void;
   onToolConsentNeeded: (req: { tool: string; input: unknown; groupName: string }) => Promise<'allow' | 'deny'>;
   onRateInputNeeded: (req: { from: CurrencyCode; to: CurrencyCode; suggested?: number }) => Promise<{ rate: number | null }>;
   onPayerPromptNeeded: (req: {
@@ -48,12 +56,11 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-type ActiveProvider = 'anthropic' | 'openai';
+type ActiveProvider = Provider;
 
-function resolveModel(settings: ReturnType<typeof useSettings>): string {
+function resolveModel(settings: ReturnType<typeof useSettings>): ModelId {
   if (settings.modelOverride) return settings.modelOverride;
-  if (settings.llmProvider === 'openai') return DEFAULT_MODEL_ID.openai;
-  return DEFAULT_MODEL_ID.anthropic;
+  return DEFAULT_MODEL_ID[settings.llmProvider];
 }
 
 export function ChatPanel({
@@ -83,15 +90,35 @@ export function ChatPanel({
   const abortRef = useRef<AbortController | null>(null);
 
   const provider: ActiveProvider = settings.llmProvider;
-  const modelId = resolveModel(settings) as ModelId;
+  const modelId = resolveModel(settings);
   const planMode = settings.planMode;
 
-  const providerLabel = useMemo(() => {
-    if (provider === 'anthropic') return MODELS[modelId as keyof typeof MODELS]?.displayName ?? 'Claude';
-    return MODELS[modelId as keyof typeof MODELS]?.displayName ?? 'OpenAI';
-  }, [provider, modelId]);
+  // Push user-configured local-model capacity into the module-level cache that
+  // `getModel('local')` reads. One-way write: settings → library. No effect writes
+  // back into the store, so there's no render loop.
+  useEffect(() => {
+    setLocalModelRuntime({
+      contextWindowTokens: settings.localModel.contextWindowTokens,
+      maxOutputTokens: settings.localModel.maxOutputTokens,
+      supportsVision: settings.localModel.supportsVision,
+    });
+  }, [
+    settings.localModel.contextWindowTokens,
+    settings.localModel.maxOutputTokens,
+    settings.localModel.supportsVision,
+  ]);
 
-  const keyMissing = !settings.apiKeys[provider];
+  const providerLabel = useMemo(() => {
+    const name = MODELS[modelId]?.displayName;
+    if (provider === 'anthropic') return name ?? 'Claude';
+    if (provider === 'openai') return name ?? 'OpenAI';
+    return settings.localModel.modelName || name || 'Local';
+  }, [provider, modelId, settings.localModel.modelName]);
+
+  const localConfigured =
+    settings.localModel.baseUrl.length > 0 && settings.localModel.modelName.length > 0;
+  const keyMissing =
+    provider === 'local' ? !localConfigured : !settings.apiKeys[provider];
   const composerDisabled = keyMissing;
 
   const runSend = async (
@@ -188,22 +215,36 @@ export function ChatPanel({
     const turnStartedAt = performance.now();
     setPending({ text: '', phase: null, turnStartedAt, phaseStartedAt: turnStartedAt });
     try {
-      const storedKey = settings.apiKeys[provider];
-      if (!storedKey) {
-        setError(`${provider} API key is missing. Add it in Settings → Providers.`);
-        return { kind: 'sent' };
-      }
-      let apiKey: string;
-      try {
-        apiKey = await keyVault.decryptKey(storedKey);
-      } catch (err) {
-        if (err instanceof VaultLockedError) {
-          setUnlockPending({
-            resume: () => runSend(blocks, options).then(() => undefined),
-          });
-          return { kind: 'deferred' };
+      let apiKey = '';
+      if (provider !== 'local') {
+        const storedKey = settings.apiKeys[provider];
+        if (!storedKey) {
+          setError(`${provider} API key is missing. Add it in Settings → Providers.`);
+          return { kind: 'sent' };
         }
-        throw err;
+        try {
+          apiKey = await keyVault.decryptKey(storedKey);
+        } catch (err) {
+          if (err instanceof VaultLockedError) {
+            setUnlockPending({
+              resume: () => runSend(blocks, options).then(() => undefined),
+            });
+            return { kind: 'deferred' };
+          }
+          throw err;
+        }
+      } else if (settings.apiKeys.local && settings.apiKeys.local.length > 0) {
+        try {
+          apiKey = await keyVault.decryptKey(settings.apiKeys.local);
+        } catch (err) {
+          if (err instanceof VaultLockedError) {
+            setUnlockPending({
+              resume: () => runSend(blocks, options).then(() => undefined),
+            });
+            return { kind: 'deferred' };
+          }
+          throw err;
+        }
       }
       const client: AgentClient =
         provider === 'anthropic'
@@ -212,11 +253,19 @@ export function ChatPanel({
               maxRetries: settings.retryConfig.maxRetries,
               baseDelayMs: settings.retryConfig.baseDelayMs,
             })
-          : new OpenAIClient({
-              apiKey,
-              maxRetries: settings.retryConfig.maxRetries,
-              baseDelayMs: settings.retryConfig.baseDelayMs,
-            });
+          : provider === 'openai'
+            ? new OpenAIClient({
+                apiKey,
+                maxRetries: settings.retryConfig.maxRetries,
+                baseDelayMs: settings.retryConfig.baseDelayMs,
+              })
+            : new LocalClient({
+                baseUrl: settings.localModel.baseUrl,
+                modelName: settings.localModel.modelName,
+                apiKey: apiKey.length > 0 ? apiKey : undefined,
+                maxRetries: settings.retryConfig.maxRetries,
+                baseDelayMs: settings.retryConfig.baseDelayMs,
+              });
       const pruned = pruneHistory(conversation.messages, modelId as keyof typeof MODELS);
       const history = rehydrateHistoryBlocks(pruned);
       const executor = createAgentExecutor(group, {
@@ -370,6 +419,7 @@ export function ChatPanel({
       currentModelId: modelId,
       planMode,
       apiKeys: settings.apiKeys,
+      localConfigured,
       setModelOverride: (id) => store.getState().setModelOverride(id),
       setLLMProvider: (p) => store.getState().setLLMProvider(p),
       setPlanMode: (v) => store.getState().setPlanMode(v),
@@ -394,12 +444,18 @@ export function ChatPanel({
     const meta = MODELS[id];
     store.getState().setModelOverride(id);
     store.getState().setLLMProvider(meta.provider);
-    const providerLabel = meta.provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
-    const keyMissing = !settings.apiKeys[meta.provider];
+    const providerLabel =
+      meta.provider === 'anthropic' ? 'Anthropic' : meta.provider === 'openai' ? 'OpenAI' : 'Local';
+    const isLocal = meta.provider === 'local';
+    const missing = isLocal ? !localConfigured : !settings.apiKeys[meta.provider];
+    if (!missing) {
+      setNotice(`Switched to ${meta.displayName} (${providerLabel}).`);
+      return;
+    }
     setNotice(
-      keyMissing
-        ? `Switched to ${meta.displayName} (${providerLabel}) — add an API key in Settings to send.`
-        : `Switched to ${meta.displayName} (${providerLabel}).`,
+      isLocal
+        ? `Switched to ${meta.displayName} (Local) — set the Base URL and model name in Settings to send.`
+        : `Switched to ${meta.displayName} (${providerLabel}) — add an API key in Settings to send.`,
     );
   };
 
@@ -449,7 +505,8 @@ export function ChatPanel({
     store.getState().discardDrafts(group.id, messageId);
   };
 
-  const providerDisplay = provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
+  const providerDisplay =
+    provider === 'anthropic' ? 'Anthropic' : provider === 'openai' ? 'OpenAI' : 'Local';
 
   return (
     <Dialog open={open} onClose={onClose} title="✨ AI assistant" widthClass="max-w-2xl">
@@ -488,11 +545,12 @@ export function ChatPanel({
           <div className="flex items-start justify-between gap-3 rounded-md border border-amber-400/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             <div>
               <div className="font-medium text-amber-100">
-                {providerDisplay} API key missing
+                {provider === 'local' ? 'Local provider not configured' : `${providerDisplay} API key missing`}
               </div>
               <div className="mt-0.5 text-amber-200/80">
-                Add your {providerDisplay} key in Settings → Providers to enable free-form
-                input and receipt photos.
+                {provider === 'local'
+                  ? 'Set the Base URL and model name in Settings → Providers → Local before sending.'
+                  : `Add your ${providerDisplay} key in Settings → Providers to enable free-form input and receipt photos.`}
               </div>
             </div>
             <Button size="sm" variant="primary" onClick={onOpenSettings}>
@@ -504,6 +562,7 @@ export function ChatPanel({
           modelId={modelId}
           planMode={planMode}
           apiKeys={settings.apiKeys}
+          localConfigured={localConfigured}
           onSelectModel={handleSelectModel}
           onTogglePlanMode={togglePlanMode}
           disabled={pending !== null}
@@ -541,6 +600,13 @@ export function ChatPanel({
 
 function formatErrorMessage(err: unknown): string {
   const suffix = (id?: string) => (id ? ` [req ${id}]` : '');
+  if (err instanceof LocalEndpointUnreachableError) {
+    return (
+      'Your browser blocked the connection to your local model (mixed content or PNA). ' +
+      'Either run TWC locally (npm run dev) or use Chrome/Edge. ' +
+      'See the "Run with Ollama" section of the README.'
+    );
+  }
   if (err instanceof AuthError) return `Auth error: ${err.message}. Check your API key in Settings.${suffix(err.requestId)}`;
   if (err instanceof ProviderRateLimitError) {
     return `Provider rate-limited. Retry in ~${Math.ceil(err.retryAfterMs / 1000)}s.${suffix(err.requestId)}`;

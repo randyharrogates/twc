@@ -1,26 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { MODELS, MODEL_IDS } from '../../lib/llm/models';
 import type { ModelId } from '../../lib/llm/types';
+import type { Provider } from '../../lib/policy';
 
 interface Props {
   modelId: ModelId;
   planMode: boolean;
-  apiKeys: { anthropic?: string; openai?: string };
+  apiKeys: { anthropic?: string; openai?: string; local?: string };
+  localConfigured: boolean;
   onSelectModel: (id: ModelId) => void;
   onTogglePlanMode: () => void;
   disabled?: boolean;
 }
 
-function groupByProvider(): Record<'anthropic' | 'openai', ModelId[]> {
-  const out: Record<'anthropic' | 'openai', ModelId[]> = { anthropic: [], openai: [] };
+function groupByProvider(): Record<Provider, ModelId[]> {
+  const out: Record<Provider, ModelId[]> = { anthropic: [], openai: [], local: [] };
   for (const id of MODEL_IDS) out[MODELS[id].provider].push(id);
   return out;
 }
+
+const PROVIDER_LABEL: Record<Provider, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  local: 'Local',
+};
 
 export function ChatToolbar({
   modelId,
   planMode,
   apiKeys,
+  localConfigured,
   onSelectModel,
   onTogglePlanMode,
   disabled = false,
@@ -70,13 +79,14 @@ export function ChatToolbar({
             role="menu"
             className="absolute left-0 top-full z-50 mt-1 w-72 rounded-md border border-ink-300 bg-ink-0 p-1 shadow-lg"
           >
-            {(['anthropic', 'openai'] as const).map((provider) => (
+            {(['anthropic', 'openai', 'local'] as Provider[]).map((provider) => (
               <div key={provider} className="py-1">
                 <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-                  {provider === 'anthropic' ? 'Anthropic' : 'OpenAI'}
+                  {PROVIDER_LABEL[provider]}
                 </div>
                 {grouped[provider].map((id) => {
-                  const keyMissing = !apiKeys[provider];
+                  const isLocal = provider === 'local';
+                  const missing = isLocal ? !localConfigured : !apiKeys[provider];
                   const active = id === modelId;
                   const meta = MODELS[id];
                   return (
@@ -93,8 +103,10 @@ export function ChatToolbar({
                       }`}
                     >
                       <span>{meta.displayName}</span>
-                      {keyMissing ? (
-                        <span className="text-[10px] text-amber-400">no API key</span>
+                      {missing ? (
+                        <span className="text-[10px] text-amber-400">
+                          {isLocal ? 'not configured' : 'no API key'}
+                        </span>
                       ) : active ? (
                         <span aria-hidden="true">✓</span>
                       ) : null}

@@ -27,3 +27,18 @@
   state and calls `grantImageConsent` on confirm.
 - `Nav.tsx` takes an `onOpenSettings` callback — the gear icon opens the settings dialog.
   ⌘/Ctrl+, is the keyboard shortcut.
+
+## Three-way provider branching — don't two-way this anymore
+
+`Provider` is now `'anthropic' | 'openai' | 'local'`. Any new code that picks a
+provider, labels one, or constructs a client must handle all three branches —
+two-way ternaries are a regression that breaks the local path silently. Use the
+canonical patterns in [`chat/ChatPanel.tsx`](chat/ChatPanel.tsx) (client
+construction + provider label + key-missing banner) and
+[`SettingsDialog.tsx`](SettingsDialog.tsx) (`LocalProviderSection` for the Local
+fields, `RemoteProvider = Exclude<Provider, 'local'>` for anything BYO-key
+specific). `APIKeyHelpPanel.tsx` is intentionally typed `RemoteProvider` only —
+local users configure their own server and don't need a third-party "create a
+key" walkthrough. The `ChatToolbar` model picker takes both `apiKeys` and
+`localConfigured` so the per-row "missing" badge can read "no API key" or "not
+configured" appropriately.

@@ -2,12 +2,15 @@
 
 Frontend-only group-expense splitter. Groups of people log who paid for what,
 assign per-item participants and a split rule, and see a minimal "who owes whom"
-settlement. A multimodal chat assistant (Anthropic + OpenAI, pluggable via the
-`AgentClient` interface) parses receipt photos and free-form notes into draft expenses that
-flow through the existing `addExpense` pipeline.
+settlement. A multimodal chat assistant (Anthropic + OpenAI + any
+OpenAI-compatible local server, pluggable via the `AgentClient` interface)
+parses receipt photos and free-form notes into draft expenses that flow through
+the existing `addExpense` pipeline.
 
 Deployment target: **GitHub Pages** (static). Real providers ship as **BYO-key**
-(user's own Anthropic / OpenAI API key, stored in their browser's `localStorage`). No
+(user's own Anthropic / OpenAI API key, stored in their browser's `localStorage`),
+or **BYO-server** for the `'local'` provider — point it at any OpenAI-compatible
+chat-completions endpoint you run (Ollama, LM Studio, vLLM, llama.cpp). No
 backend required; a Cloudflare Worker proxy is the documented escape hatch if a
 shared-key mode is ever needed.
 
@@ -22,7 +25,9 @@ supports an opt-in session-scoped passphrase vault that encrypts
 `KeyVault`'s private memory for the session; the passphrase itself is **never
 persisted** — only the salt, iteration count, and an encrypted probe (stored on
 `settings.vault`) so `unlock(passphrase)` can verify a candidate. Ciphertext is a
-tagged string: `enc.v1.<iv>.<ct>`. The pattern uses the same PBKDF2-SHA256 + AES-GCM
+tagged string: `enc.v1.<iv>.<ct>`. The `'local'` provider's optional API key
+flows through the same vault pipeline when set; when blank, no header is sent
+and there's nothing for the vault to protect. The pattern uses the same PBKDF2-SHA256 + AES-GCM
 parameters as a prior project. Files:
 [`src/lib/crypto.ts`](src/lib/crypto.ts), [`src/lib/keyVault.ts`](src/lib/keyVault.ts),
 [`src/components/SecurityPanel.tsx`](src/components/SecurityPanel.tsx),
@@ -34,6 +39,9 @@ parameters as a prior project. Files:
 - Tailwind CSS v4 (via `@tailwindcss/vite`)
 - Zustand (with `persist` middleware → `localStorage`)
 - Vitest (`src/test/**`)
+- Local models via any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM,
+  llama.cpp server) — see [`src/lib/llm/localClient.ts`](src/lib/llm/localClient.ts)
+  and the README "Run with Ollama" section.
 
 No backend, no auth, no network calls, no API keys in code.
 
@@ -151,8 +159,11 @@ TWC's `AgentClient` interface (`src/lib/llm/agent.ts`) exposes a single turn-lev
 method: `sendTurn(AgentTurnRequest) → Promise<AssistantTurnResult>`. A turn yields
 `blocks` (text + tool_use) and a `stopReason` (`end_turn` | `tool_use` | `max_tokens`);
 the agentic loop `runTurn(RunTurnOpts)` in the same file iterates `sendTurn` calls,
-dispatches tool executions, and emits `onPhase` events until `end_turn`. Anthropic and
-OpenAI clients are wired via direct `fetch` calls (no SDK — matches claw-code's
-`reqwest` usage and keeps the supply-chain surface small). Zod + `zod-to-json-schema`
-generates strict JSON-Schema for both Anthropic `tool_use` and OpenAI
-`response_format.json_schema.strict`.
+dispatches tool executions, and emits `onPhase` events until `end_turn`. Anthropic,
+OpenAI, and Local clients are wired via direct `fetch` calls (no SDK — matches
+claw-code's `reqwest` usage and keeps the supply-chain surface small). Zod +
+`zod-to-json-schema` generates strict JSON-Schema for both Anthropic `tool_use` and
+OpenAI `response_format.json_schema.strict`. The OpenAI and Local clients share an
+extracted `OpenAICompatClient` primitive (`src/lib/llm/openaiCompatClient.ts`); a
+new OpenAI-compatible provider should be added as a thin preset around it rather
+than a hand-rolled client.

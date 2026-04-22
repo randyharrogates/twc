@@ -1,7 +1,12 @@
 import type { Provider } from '../lib/policy';
 
+// Only the remote BYO-key providers have guided generation flows. Local users
+// configure their own server (see SettingsDialog → Local section) and do not need
+// a third-party "create a key" walkthrough.
+type RemoteProvider = Exclude<Provider, 'local'>;
+
 interface Props {
-  provider: Provider;
+  provider: RemoteProvider;
 }
 
 interface Guide {
@@ -10,7 +15,7 @@ interface Guide {
   steps: string[];
 }
 
-const GUIDES: Record<Provider, Guide> = {
+const GUIDES: Record<RemoteProvider, Guide> = {
   anthropic: {
     label: 'Anthropic',
     url: 'https://console.anthropic.com/settings/keys',

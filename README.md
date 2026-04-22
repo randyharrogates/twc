@@ -35,6 +35,7 @@
     - [Safety rails](#safety-rails)
   - [Screenshots](#screenshots)
   - [Architecture](#architecture)
+  - [Run with Ollama (local model)](#run-with-ollama-local-model)
   - [Quick start](#quick-start)
   - [Chat assistant deep-dive](#chat-assistant-deep-dive)
     - [Slash commands](#slash-commands)
@@ -161,14 +162,20 @@ codes, symbols, or decimals elsewhere.
 
 ### LLM providers
 
-Both providers are wired via direct `fetch` — no SDK. Models and prices live in
-[`src/lib/llm/models.ts`](src/lib/llm/models.ts); each entry carries a
+All providers are wired via direct `fetch` — no SDK. Models and prices live in
+[`src/lib/llm/models.ts`](src/lib/llm/models.ts); each remote entry carries a
 `lastVerifiedIso` and CI fails once an entry is >365 days old.
 
 | Provider      | Models                                                | Streaming | Tool use | Thinking / reasoning                                                              |
 | ------------- | ----------------------------------------------------- | :-------: | :------: | --------------------------------------------------------------------------------- |
 | **Anthropic** | Claude Haiku 4.5, Sonnet 4.6, Opus 4.7                |     ✔     |    ✔     | Optional extended thinking via `thinking: { budget_tokens }`                      |
 | **OpenAI**    | GPT-5, GPT-5 mini, GPT-4.1, GPT-4.1 mini, GPT-4o mini |     ✔     |    ✔     | Intrinsic reasoning on GPT-5 family (`reasoning_effort`, `max_completion_tokens`) |
+| **Local**     | Any tag your server exposes (`qwen2.5-vl:7b`, `llama3.2-vision:11b`, etc.) | ✔ | ✔ | Whatever the model does — TWC just forwards the OpenAI-compat call |
+
+The Local provider points at any OpenAI-compatible `/v1/chat/completions` endpoint
+you run yourself (Ollama, LM Studio, vLLM, llama.cpp server). See
+[**Run with Ollama (local model)**](#run-with-ollama-local-model) below for the
+full walkthrough — origin allow-list, browser compatibility, security trade-offs.
 
 ### Safety rails
 
@@ -205,6 +212,7 @@ flowchart LR
   AC[AgentClient.sendTurn]
   A[AnthropicClient]
   O[OpenAIClient]
+  L[LocalClient — OpenAI-compat]
   TR[tools/registry]
   T1[add_member]
   T2[resolve_name]
@@ -218,6 +226,7 @@ flowchart LR
   RT <--> AC
   AC --> A
   AC --> O
+  AC --> L
   RT --> TR
   TR --> T1 & T2 & T3 & T4 & T5
   T5 --> Store --> Settle
@@ -228,6 +237,186 @@ The only sanctioned float boundary is FX conversion in `src/lib/currency.ts`, wh
 always ends in `Math.round`. Every proportional split preserves
 `Σ shares === expense.amountMinor` via largest-remainder; every settlement asserts
 `Σ balances === 0` in base-currency minor units and throws on violation.
+
+---
+
+## Run with Ollama (local model)
+
+### Why this exists
+
+You can point TWC at any OpenAI-compatible local server (Ollama, LM Studio,
+llama.cpp server, vLLM) instead of paying for Anthropic or OpenAI. Receipts and
+chat content never leave your machine — unless you choose a remote OpenAI-compat
+endpoint, in which case it leaves on your terms. Cost goes to zero, and you get
+to run open-weights families (Qwen, Llama, Mistral, DeepSeek) without a billing
+relationship.
+
+### Install Ollama
+
+Download from <https://ollama.com/download>. Install, then verify:
+
+```sh
+ollama --version
+```
+
+**Use ≥ 0.5.** Older versions don't respond to Chrome's Private Network Access
+preflight, so the browser silently refuses to connect even with `OLLAMA_ORIGINS`
+set correctly.
+
+### Recommended vision models
+
+| Model                  | Pull command                       | Notes                              |
+| ---------------------- | ---------------------------------- | ---------------------------------- |
+| `qwen2.5-vl:7b`        | `ollama pull qwen2.5-vl:7b`        | Fastest, solid OCR on receipts.    |
+| `llama3.2-vision:11b`  | `ollama pull llama3.2-vision:11b`  | Meta's VLM, larger context window. |
+| `minicpm-v:8b`         | `ollama pull minicpm-v:8b`         | Good multilingual receipts.        |
+
+Pick one. You can swap the model name in Settings → Local later without
+reinstalling TWC.
+
+### The CORS step — exact `OLLAMA_ORIGINS` values
+
+Ollama refuses cross-origin browser requests by default. You must set
+`OLLAMA_ORIGINS` to the **exact origin** TWC is loaded from.
+
+```sh
+# If running TWC locally (npm run dev):
+OLLAMA_ORIGINS="http://localhost:5173" ollama serve
+
+# If using the published URL from Chrome:
+OLLAMA_ORIGINS="https://randyharrogates.github.io" ollama serve
+
+# Both (Chrome users who toggle):
+OLLAMA_ORIGINS="http://localhost:5173,https://randyharrogates.github.io" ollama serve
+```
+
+> ⚠️ **Never use `OLLAMA_ORIGINS=*`.** That lets *any* webpage you visit — ad
+> frames, untrusted sites, anything — query your Ollama, consume your GPU, and
+> submit prompts in your name. Always pin to TWC's exact origin.
+
+LM Studio: set "CORS origins" in its server settings to the same value.
+llama.cpp server: pass `--api-allow-origin <url>`.
+
+### Configure TWC
+
+1. Open **Settings → Providers → Local** (it's the third panel in the Providers
+   tab).
+2. **Base URL**: `http://localhost:11434/v1/chat/completions`
+3. **Model name**: the tag you pulled — e.g. `qwen2.5-vl:7b`. Use the exact
+   string from `ollama list`.
+4. **Context window (tokens)**: match your Ollama config (Ollama default is
+   `32768`). If TWC's value is lower, preflight will refuse oversized requests;
+   if higher, the server will silently truncate.
+5. **Max output tokens**: `4096` is a reasonable default for receipt parsing.
+6. **Supports vision**: tick this if you pulled a vision-capable model
+   (`qwen2.5-vl`, `llama3.2-vision`, `minicpm-v`, `llava`). Leave unchecked for
+   text-only models — flipping it for a text model will produce errors when you
+   send a receipt photo.
+7. **API key**: leave blank. Most local servers don't require one and TWC will
+   omit the `Authorization` header entirely.
+8. Click **Save Local settings**, then switch the **Active provider** dropdown
+   at the top of the panel to **Local**.
+9. Open the chat (⌘K), grant the one-time **Local** image consent prompt the
+   first time you attach a receipt, and send.
+
+### Browser compatibility
+
+Mixed content (HTTPS page → `http://localhost`) is the load-bearing constraint:
+
+| Browser       | From `https://github.io`              | From `http://localhost:5173` |
+| ------------- | ------------------------------------- | ---------------------------- |
+| Chrome / Edge | ✅ Works                              | ✅ Works                     |
+| Firefox       | ⚠ Often blocked by mixed content      | ✅ Works                     |
+| Safari        | ❌ Blocked by mixed content           | ✅ Works                     |
+
+**If you hit the mixed-content block**, run TWC locally with `npm run dev`
+(see the **Quick start** section below) — same app, same data, no HTTPS↔HTTP
+conflict. Or put Ollama behind a local HTTPS proxy (Caddy, nginx) or expose it
+over Cloudflare Tunnel with HTTPS, then paste the `https://...` URL into
+Settings.
+
+### Troubleshooting
+
+| Symptom                                     | Likely cause                                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `LocalEndpointUnreachableError` toast        | Mixed content. See the table above.                                                           |
+| `403 Forbidden` from the server             | `OLLAMA_ORIGINS` (or LM Studio's CORS list) doesn't include TWC's origin.                     |
+| `Parse error` toast on every turn           | The model isn't honoring the tool schema. Try `qwen2.5-vl:7b` or a larger model.              |
+| Send button stays disabled                  | Local provider needs both Base URL and model name set in Settings → Providers → Local.        |
+| Ollama replies with `model not found`       | Run `ollama list` and copy the exact tag (including `:tag` suffix) into the Model name field. |
+
+### Security — risks and what to do about them
+
+#### 1. Mixed content (structural)
+
+**Threat.** `https://randyharrogates.github.io` fetching `http://localhost:11434`
+is mixed content. Firefox and Safari usually block it silently; Chrome/Edge
+permit it.
+
+**Action (choose one).**
+- **Easiest:** use Chrome or Edge.
+- **Cross-browser:** run TWC locally instead of the published URL.
+- **Advanced:** put Ollama behind a local HTTPS proxy or a Cloudflare Tunnel
+  with HTTPS, then paste the `https://...` URL into Settings.
+
+#### 2. Over-broad `OLLAMA_ORIGINS`
+
+**Threat.** `OLLAMA_ORIGINS=*` lets any webpage query your Ollama.
+
+**Action.** Pin to exactly the origin you use (see the CORS step above).
+
+#### 3. SSRF-adjacent fetch via a tricked Base URL
+
+**Threat.** A malicious link or copy-pasted value could try to make TWC fetch
+unintended URLs (internal services, LAN scans).
+
+**TWC's built-in mitigation.** A URL allow-list in
+[`src/lib/llm/localClient.ts`](src/lib/llm/localClient.ts) and
+[`src/components/SettingsDialog.tsx`](src/components/SettingsDialog.tsx). Only
+HTTPS, `http://localhost`, `http://127.0.0.1`, or `http://[::1]` are accepted.
+Anything else is rejected at save time with an inline error.
+
+**Action.** Paste only your own local server URL or a trusted HTTPS endpoint you
+run. If a tutorial tells you to paste a third-party `http://` URL, refuse.
+
+#### 4. Shared `github.io` origin
+
+**Threat.** `randyharrogates.github.io` is shared with every other GitHub Pages
+site under the same user. Sibling pages can read TWC's `localStorage`. With the
+Local provider and no API key, there's nothing secret to leak — but if
+`OLLAMA_ORIGINS` includes the github.io origin, sibling pages can also call your
+Ollama.
+
+**Action.** If shared-origin matters to you, run TWC from `http://localhost:5173`
+instead of the published URL, and set
+`OLLAMA_ORIGINS=http://localhost:5173`. Sibling GitHub Pages sites have no way
+into a local origin.
+
+#### 5. Private Network Access (PNA) preflight
+
+**Threat.** Chrome requires a CORS preflight with
+`Access-Control-Request-Private-Network: true` for cross-origin fetches to
+`localhost`. Older servers that don't respond correctly fail silently.
+
+**Action.** Use Ollama ≥ 0.5, LM Studio ≥ 0.3.4, or llama.cpp server with
+`--api-allow-pna`.
+
+#### 6. Prompt injection via receipt OCR on a weak model
+
+**Threat.** A crafted receipt image could try to steer a smaller local model
+into misusing tools.
+
+**TWC's built-in mitigation (provider-agnostic).**
+- Mutating tools (`add_member`, `submit_drafts`) require `PermissionPrompter`
+  approval before they run.
+- Plan mode physically removes the mutating tool definitions from the prompt —
+  the model can't emit them.
+- Every tool call re-validates its input against a Zod schema; malformed
+  payloads surface as `parseError` toasts, never as silent state changes.
+
+**Action.** Stick to reputable model families (Qwen, Llama, Mistral, DeepSeek
+official quants). Keep plan mode on for ambiguous receipts and review drafts
+before clicking Accept.
 
 ---
 

@@ -1,4 +1,5 @@
 import type { ModelId, ReasoningEffort } from './types';
+import type { Provider } from '../policy';
 
 // reasoningKind distinguishes models that reason intrinsically (OpenAI GPT-5 family —
 // reasoning_effort is mandatory), models where reasoning is opt-in via a `thinking`
@@ -9,11 +10,11 @@ export type ReasoningKind = 'none' | 'intrinsic' | 'optional';
 
 export interface Model {
   id: ModelId;
-  provider: 'anthropic' | 'openai';
+  provider: Provider;
   displayName: string;
   contextWindowTokens: number;
   maxOutputTokens: number;
-  supportsVision: true;
+  supportsVision: boolean;
   priceInputMicrosPerMillion: number;
   priceOutputMicrosPerMillion: number;
   imageFlatTokens: number;
@@ -21,7 +22,7 @@ export interface Model {
   lastVerifiedIso: string;
 }
 
-export const MODELS: Record<ModelId, Model> = {
+const STATIC_MODELS: Record<Exclude<ModelId, 'local'>, Model> = {
   'claude-haiku-4-5': {
     id: 'claude-haiku-4-5',
     provider: 'anthropic',
@@ -128,32 +129,90 @@ export const MODELS: Record<ModelId, Model> = {
   },
 };
 
+// Local-model runtime cache. The user-declared base URL, model name, context window,
+// max output, and vision flag come from settings.localModel (state/store.ts) and are
+// pushed into this module via setLocalModelRuntime() — typically by a `useEffect` in
+// `ChatPanel`. Reads happen at call time via the getter on `MODELS.local` and inside
+// `getModel('local')`, so a settings change is reflected on the very next chat send
+// without any module re-import. Defaults match `defaultLocalModel()` in store.ts.
+export interface LocalModelRuntime {
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  supportsVision: boolean;
+}
+
+const LOCAL_DEFAULTS: LocalModelRuntime = {
+  contextWindowTokens: 32_768,
+  maxOutputTokens: 4_096,
+  supportsVision: false,
+};
+
+let localRuntime: LocalModelRuntime = { ...LOCAL_DEFAULTS };
+
+export function setLocalModelRuntime(opts: LocalModelRuntime): void {
+  localRuntime = { ...opts };
+}
+
+export function resetLocalModelRuntime(): void {
+  localRuntime = { ...LOCAL_DEFAULTS };
+}
+
+function buildLocalModel(): Model {
+  return {
+    id: 'local',
+    provider: 'local',
+    displayName: 'Local',
+    contextWindowTokens: localRuntime.contextWindowTokens,
+    maxOutputTokens: localRuntime.maxOutputTokens,
+    supportsVision: localRuntime.supportsVision,
+    priceInputMicrosPerMillion: 0,
+    priceOutputMicrosPerMillion: 0,
+    imageFlatTokens: 0,
+    reasoningKind: 'none',
+    // Sentinel — local models are user-declared, no remote registry to verify against.
+    // Excluded from the year-staleness CI test in models.test.ts.
+    lastVerifiedIso: '9999-12-31',
+  };
+}
+
+const MODELS_OBJ = { ...STATIC_MODELS } as Record<ModelId, Model>;
+Object.defineProperty(MODELS_OBJ, 'local', {
+  enumerable: true,
+  configurable: false,
+  get: buildLocalModel,
+});
+
+export const MODELS: Record<ModelId, Model> = MODELS_OBJ;
+
 export const MODEL_IDS = Object.keys(MODELS) as ModelId[];
 
-export const DEFAULT_MODEL_ID: Record<'anthropic' | 'openai', ModelId> = {
+export const DEFAULT_MODEL_ID: Record<Provider, ModelId> = {
   anthropic: 'claude-haiku-4-5',
   openai: 'gpt-5-mini',
+  local: 'local',
 };
 
 export function getModel(id: ModelId): Model {
-  const m = MODELS[id];
+  if (id === 'local') return buildLocalModel();
+  const m = STATIC_MODELS[id];
   if (!m) throw new Error(`Unknown model id: ${id}`);
   return m;
 }
 
 export function isModelId(value: string): value is ModelId {
-  return Object.prototype.hasOwnProperty.call(MODELS, value);
+  if (value === 'local') return true;
+  return Object.prototype.hasOwnProperty.call(STATIC_MODELS, value);
 }
 
 // Cf. claw-code/rust/crates/api/src/providers/openai_compat.rs:774-790
 // (is_reasoning_model) — OpenAI reasoning models (o-series / GPT-5) reject
 // max_tokens/temperature/top_p and require max_completion_tokens + reasoning_effort.
 export function isReasoningModel(id: ModelId): boolean {
-  return MODELS[id].reasoningKind === 'intrinsic';
+  return getModel(id).reasoningKind === 'intrinsic';
 }
 
 export function supportsOptionalThinking(id: ModelId): boolean {
-  return MODELS[id].reasoningKind === 'optional';
+  return getModel(id).reasoningKind === 'optional';
 }
 
 export function thinkingBudgetFor(effort: ReasoningEffort): number | null {

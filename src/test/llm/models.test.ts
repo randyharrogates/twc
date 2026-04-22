@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   MODELS,
   MODEL_IDS,
@@ -6,21 +6,27 @@ import {
   getModel,
   isModelId,
   isReasoningModel,
+  resetLocalModelRuntime,
+  setLocalModelRuntime,
   supportsOptionalThinking,
   thinkingBudgetFor,
 } from '../../lib/llm/models';
-import type { ReasoningEffort } from '../../lib/llm/types';
+import type { ModelId, ReasoningEffort } from '../../lib/llm/types';
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const NOW_MS = Date.parse('2026-04-19T00:00:00Z');
+const REMOTE_IDS: ModelId[] = MODEL_IDS.filter((id) => id !== 'local');
+
+afterEach(() => resetLocalModelRuntime());
 
 describe('model registry', () => {
-  it('lists eight vision-capable models across Anthropic (3) and OpenAI (5)', () => {
-    expect(MODEL_IDS).toHaveLength(8);
-    const providers = MODEL_IDS.map((id) => MODELS[id].provider);
+  it('lists eight remote vision-capable models across Anthropic (3) and OpenAI (5), plus the local entry', () => {
+    expect(REMOTE_IDS).toHaveLength(8);
+    expect(MODEL_IDS).toContain('local');
+    const providers = REMOTE_IDS.map((id) => MODELS[id].provider);
     expect(providers.filter((p) => p === 'anthropic')).toHaveLength(3);
     expect(providers.filter((p) => p === 'openai')).toHaveLength(5);
-    for (const id of MODEL_IDS) {
+    for (const id of REMOTE_IDS) {
       expect(MODELS[id].supportsVision).toBe(true);
     }
   });
@@ -52,12 +58,46 @@ describe('model registry', () => {
     }
   });
 
+  it('marks the local entry as a non-reasoning, zero-priced, default-text-only model', () => {
+    const m = MODELS.local;
+    expect(m.provider).toBe('local');
+    expect(m.reasoningKind).toBe('none');
+    expect(m.priceInputMicrosPerMillion).toBe(0);
+    expect(m.priceOutputMicrosPerMillion).toBe(0);
+    expect(m.imageFlatTokens).toBe(0);
+    expect(m.supportsVision).toBe(false);
+  });
+
+  it('reflects setLocalModelRuntime() values in MODELS.local on the next read', () => {
+    setLocalModelRuntime({
+      contextWindowTokens: 65_536,
+      maxOutputTokens: 8_192,
+      supportsVision: true,
+    });
+    expect(MODELS.local.contextWindowTokens).toBe(65_536);
+    expect(MODELS.local.maxOutputTokens).toBe(8_192);
+    expect(MODELS.local.supportsVision).toBe(true);
+    expect(getModel('local').contextWindowTokens).toBe(65_536);
+  });
+
+  it('resetLocalModelRuntime() restores defaults', () => {
+    setLocalModelRuntime({
+      contextWindowTokens: 65_536,
+      maxOutputTokens: 8_192,
+      supportsVision: true,
+    });
+    resetLocalModelRuntime();
+    expect(MODELS.local.contextWindowTokens).toBe(32_768);
+    expect(MODELS.local.maxOutputTokens).toBe(4_096);
+    expect(MODELS.local.supportsVision).toBe(false);
+  });
+
   it('defaults OpenAI to gpt-5-mini', () => {
     expect(DEFAULT_MODEL_ID.openai).toBe('gpt-5-mini');
   });
 
-  it('stores prices as positive integer micro-USD per million tokens', () => {
-    for (const id of MODEL_IDS) {
+  it('stores prices as positive integer micro-USD per million tokens (remote providers only — local is free)', () => {
+    for (const id of REMOTE_IDS) {
       const m = MODELS[id];
       expect(Number.isInteger(m.priceInputMicrosPerMillion)).toBe(true);
       expect(Number.isInteger(m.priceOutputMicrosPerMillion)).toBe(true);
@@ -76,7 +116,7 @@ describe('model registry', () => {
     }
   });
 
-  it('has Anthropic imageFlatTokens set, OpenAI left at 0 (tile math handled elsewhere)', () => {
+  it('has Anthropic imageFlatTokens set, OpenAI and local left at 0 (tile math handled elsewhere)', () => {
     for (const id of MODEL_IDS) {
       const m = MODELS[id];
       if (m.provider === 'anthropic') expect(m.imageFlatTokens).toBeGreaterThan(0);
@@ -84,13 +124,14 @@ describe('model registry', () => {
     }
   });
 
-  it('DEFAULT_MODEL_ID entries exist in the registry', () => {
+  it('DEFAULT_MODEL_ID entries exist in the registry for every provider including local', () => {
     expect(MODELS[DEFAULT_MODEL_ID.anthropic]).toBeDefined();
     expect(MODELS[DEFAULT_MODEL_ID.openai]).toBeDefined();
+    expect(DEFAULT_MODEL_ID.local).toBe('local');
   });
 
-  it('every entry has a lastVerifiedIso within the last 12 months', () => {
-    for (const id of MODEL_IDS) {
+  it('every remote entry has a lastVerifiedIso within the last 12 months (local is user-declared, excluded)', () => {
+    for (const id of REMOTE_IDS) {
       const verified = Date.parse(MODELS[id].lastVerifiedIso);
       expect(Number.isFinite(verified)).toBe(true);
       expect(NOW_MS - verified).toBeLessThanOrEqual(ONE_YEAR_MS);
@@ -106,6 +147,7 @@ describe('model registry', () => {
     expect(isModelId('claude-sonnet-4-6')).toBe(true);
     expect(isModelId('gpt-5')).toBe(true);
     expect(isModelId('gpt-5-mini')).toBe(true);
+    expect(isModelId('local')).toBe(true);
     expect(isModelId('gpt-3.5')).toBe(false);
     expect(isModelId('')).toBe(false);
   });

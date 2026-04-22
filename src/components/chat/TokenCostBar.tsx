@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { microUsdToUsd } from '../../lib/llm/cost';
-import { useCostTracker, usePolicy } from '../../state/store';
+import { useCostTracker, usePolicy, useSettings } from '../../state/store';
 import { dayKey } from '../../lib/llm/cost';
 
 function last30Days(nowMs: number): string[] {
@@ -15,10 +15,12 @@ function last30Days(nowMs: number): string[] {
 export function TokenCostBar() {
   const tracker = useCostTracker();
   const policy = usePolicy();
+  const settings = useSettings();
   const [now] = useState(() => Date.now());
   const todayKey = dayKey(now);
   const todayMicros = tracker.dailyUsdMicros[todayKey] ?? 0;
   const cap = policy.dailyCapUsdMicros;
+  const isLocal = settings.llmProvider === 'local';
 
   const pct = cap > 0 ? Math.min(1, todayMicros / cap) : 0;
   const barColor = pct >= 1 ? 'bg-red-500' : pct >= 0.8 ? 'bg-amber-400' : 'bg-accent-500';
@@ -34,13 +36,22 @@ export function TokenCostBar() {
     <div className="rounded-xl border border-ink-300 bg-ink-100/50 px-3 py-2 text-xs text-ink-700">
       <div className="flex items-center justify-between">
         <span>
-          <strong className="font-mono text-ink-800">${microUsdToUsd(todayMicros).toFixed(4)}</strong>
-          <span className="mx-1 text-ink-500">today</span>
-          <span className="text-ink-500">
-            / ${microUsdToUsd(cap).toFixed(2)} cap
-          </span>
+          {isLocal ? (
+            <>
+              <strong className="font-mono text-ink-800">$0.00</strong>
+              <span className="mx-1 text-ink-500">(local)</span>
+            </>
+          ) : (
+            <>
+              <strong className="font-mono text-ink-800">${microUsdToUsd(todayMicros).toFixed(4)}</strong>
+              <span className="mx-1 text-ink-500">today</span>
+              <span className="text-ink-500">
+                / ${microUsdToUsd(cap).toFixed(2)} cap
+              </span>
+            </>
+          )}
         </span>
-        <span className="text-ink-500">{Math.round(pct * 100)}%</span>
+        <span className="text-ink-500">{isLocal ? '—' : `${Math.round(pct * 100)}%`}</span>
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink-200">
         <div className={`h-full ${barColor}`} style={{ width: `${pct * 100}%` }} />

@@ -1,7 +1,10 @@
 # src/lib/llm/ rules
 
 - `AgentClient` in `agent.ts` defines the agentic multi-turn contract: `sendTurn`. The
-  two real providers (`AnthropicClient`, `OpenAIClient`) implement it.
+  three real providers (`AnthropicClient`, `OpenAIClient`, `LocalClient`) implement it.
+  `OpenAIClient` and `LocalClient` are thin presets around the shared
+  `OpenAICompatClient` in `openaiCompatClient.ts` — adding a new OpenAI-shaped
+  provider should follow the preset pattern instead of cloning a client.
   - `sendTurn(AgentTurnRequest) → AssistantTurnResult` — emits a turn-level response
     with `blocks` (text + tool_use) and a `stopReason` (`end_turn` | `tool_use` |
     `max_tokens`). The `ChatPanel` runs `runTurn(agent.ts)` on top of this.
@@ -67,10 +70,35 @@
   a BYO-key page that reads `localStorage`; (c) each client stays auditable (~330 lines).
 - **Anthropic browser CORS requires `anthropic-dangerous-direct-browser-access: true`**
   plus `x-api-key` + `anthropic-version: 2023-06-01`. OpenAI is plain `Authorization: Bearer`.
-- **Real providers take an API key as a constructor argument.** The caller pulls it from
-  user settings (localStorage). Keys never appear in request bodies (only in headers),
-  never in logs, never in exports. Each client has a `never includes the API key in the
-  request body` test that pins this.
+- **`OpenAICompatClient` is the shared primitive** for any OpenAI-shaped provider.
+  It accepts `{ baseUrl, apiKey?, apiModelName?, providerLabel? }`. When `apiKey`
+  is blank, the `Authorization` header is omitted entirely (no `Bearer ` prefix on
+  an empty value). When `apiModelName` is set, it overrides only `body.model` —
+  `req.model` is still used for `getModel(req.model)` lookups (cap, pricing,
+  reasoning-kind). `LocalClient` uses this to forward `body.model: '<user tag>'`
+  while `req.model: 'local'` resolves the runtime cache.
+- **`LocalClient` enforces a URL allow-list at construction.** Allowed:
+  `https://*`, `http://localhost`, `http://127.0.0.1`, `http://[::1]` (any port,
+  any path). Anything else throws synchronously — this is the load-bearing
+  SSRF-adjacent guard, not a UI hint. The same `isAllowedLocalBaseUrl(...)` helper
+  is mirrored in `SettingsDialog` for save-time validation.
+- **`LocalClient` wraps `fetch` so generic "Failed to fetch" errors become
+  `LocalEndpointUnreachableError`** (extends `NetworkError`). Mixed-content blocks,
+  Private Network Access preflight failures, refused connections, and DNS errors all
+  surface this way; the UI maps them to the README's Run-with-Ollama section.
+- **`getModel('local')` is a runtime-cached read, not a static record.** The model's
+  `contextWindowTokens`, `maxOutputTokens`, and `supportsVision` come from
+  `LOCAL_DEFAULTS` until the user pushes their settings via `setLocalModelRuntime(opts)`.
+  `MODELS.local` is exposed via `Object.defineProperty(..., { get })` so it always
+  reflects the latest cache. Tests must call `resetLocalModelRuntime()` in
+  `afterEach` (or `setLocalModelRuntime(...)` in `beforeEach`) to keep module state
+  isolated.
+- **Real providers take an API key as a constructor argument.** For Anthropic and
+  OpenAI it's required; for `LocalClient` it's optional (most local servers don't
+  need one). The caller pulls it from user settings (localStorage). Keys never
+  appear in request bodies (only in headers), never in logs, never in exports.
+  Each client has a `never includes the API key in the request body` test that
+  pins this.
 - **Key retrieval is async and routed through the passphrase vault.** The stored value in
   `settings.apiKeys.<provider>` may be plaintext or a `enc.v1.<iv>.<ct>` ciphertext;
   `keyVault.decryptKey(stored)` returns the plaintext or throws `VaultLockedError` from
@@ -80,7 +108,9 @@
 - **Cost math lives in `cost.ts`.** Prices are integer µUSD per million tokens; exactly
   two `Math.round` calls per turn at the µUSD boundary. No float propagates beyond.
 - **Model registry in `models.ts` must be refreshed yearly.** Every entry has a
-  `lastVerifiedIso`; `models.test.ts` fails CI if any entry is >365 days old.
+  `lastVerifiedIso`; `models.test.ts` fails CI if any *remote* entry is >365 days
+  old. The `'local'` entry is excluded — it's user-declared, has no upstream
+  registry to verify against, and uses a sentinel `'9999-12-31'`.
 - **Preflight** runs BEFORE every real-provider send: estimates tokens, rejects over-window
   requests without hitting the provider, rejects images >5 MB after encoding with an
   actionable toast (no silent downscale).

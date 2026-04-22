@@ -92,7 +92,7 @@ describe('evaluatePolicy — uploadImage', () => {
   it('denies when consent for that provider is false', () => {
     const d = evaluatePolicy(
       { kind: 'uploadImage', provider: 'openai' },
-      policy({ imageConsentByProvider: { anthropic: true, openai: false } }),
+      policy({ imageConsentByProvider: { anthropic: true, openai: false, local: false } }),
       emptyCosts(),
       NOW,
     );
@@ -102,7 +102,7 @@ describe('evaluatePolicy — uploadImage', () => {
   it('allows when consent for that provider is true', () => {
     const d = evaluatePolicy(
       { kind: 'uploadImage', provider: 'anthropic' },
-      policy({ imageConsentByProvider: { anthropic: true, openai: false } }),
+      policy({ imageConsentByProvider: { anthropic: true, openai: false, local: false } }),
       emptyCosts(),
       NOW,
     );
@@ -110,7 +110,7 @@ describe('evaluatePolicy — uploadImage', () => {
   });
 
   it('tracks consent independently per provider', () => {
-    const p = policy({ imageConsentByProvider: { anthropic: true, openai: false } });
+    const p = policy({ imageConsentByProvider: { anthropic: true, openai: false, local: false } });
     expect(evaluatePolicy({ kind: 'uploadImage', provider: 'anthropic' }, p, emptyCosts(), NOW).allow).toBe(true);
     expect(evaluatePolicy({ kind: 'uploadImage', provider: 'openai' }, p, emptyCosts(), NOW).allow).toBe(false);
   });

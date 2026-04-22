@@ -482,7 +482,7 @@ describe('store planMode setting', () => {
       version: number;
     };
     expect(parsed.state.settings.planMode).toBe(true);
-    expect(parsed.version).toBe(7);
+    expect(parsed.version).toBe(8);
   });
 
   it('setPlanMode(false) flips the flag back', () => {
