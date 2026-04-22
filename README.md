@@ -27,6 +27,7 @@
 - [TWC](#twc)
   - [Table of contents](#table-of-contents)
   - [What is TWC?](#what-is-twc)
+  - [`twc-agent/` — the Claude Code sibling](#twc-agent--the-claude-code-sibling)
   - [Features](#features)
     - [Splitting](#splitting)
     - [Currencies](#currencies)
@@ -73,6 +74,57 @@ Anthropic or OpenAI key into Settings, it lives in _your_ `localStorage`, and it
 redacted from exports and never leaves the browser except as a request header. A
 Cloudflare Worker proxy is the documented escape hatch if a shared-key mode is ever
 needed — not built today.
+
+---
+
+## `twc-agent/` — the Claude Code sibling
+
+Living alongside the deployed app is [`twc-agent/`](twc-agent/), a
+**local-only, single-user** variant where **Claude Code is the input
+surface** instead of the in-browser chat. Same domain logic (money
+invariants, split math, settlement), same 9-currency allow-list. Two
+things change:
+
+1. **No in-browser LLM and no API keys.** Claude Code runs in your
+   terminal against your Pro / Max subscription.
+2. **State lives as JSON on your filesystem** under
+   `twc-agent/data/groups/*.json`. Claude reads / edits / writes those
+   files with its native tools; the Vite app is just a viewer + light
+   editor.
+
+### How to run it
+
+```sh
+cd twc-agent
+claude
+```
+
+**Start Claude Code from inside `twc-agent/`, not the TWC repo root.**
+Claude treats its current working directory as the project root, so
+starting it here sandboxes it to this subfolder — it can't `Read` /
+`Edit` / `Write` anything in the parent TWC (`../src`, the deployed app,
+this README). The sandbox is cwd-based, not permission-based, so stay
+in `twc-agent/` for the whole session. If Claude ever tries to reach
+`../`, exit and re-launch from the right directory.
+
+Once Claude is running, use the [slash
+commands](twc-agent/.claude/commands) — `/twc-new-group`,
+`/twc-add-expense`, `/twc-import-receipt`, `/twc-settle` — to build a
+group. Run `npm run dev` (from inside `twc-agent/`, in another
+terminal) to view the result in the browser. Full walkthrough:
+[`twc-agent/README.md`](twc-agent/README.md).
+
+### Why it exists
+
+- Use `twc-agent/` when you want the group to be **yours** — on your
+  disk, no keys pasted into a webpage, no shared-origin risk.
+- Use the deployed TWC at
+  [randyharrogates.github.io/twc](https://randyharrogates.github.io/twc/)
+  when you want the browser-only BYO-key experience.
+
+The two projects are independent: `twc-agent/` has its own
+`package.json`, `node_modules`, `.claude/` skill and slash commands, and
+no imports cross the boundary.
 
 ---
 

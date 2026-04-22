@@ -79,6 +79,32 @@ Each subdirectory has its own `CLAUDE.md` with local rules. Read the one closest
 - [`src/components/chat/CLAUDE.md`](src/components/chat/CLAUDE.md)
 - [`src/test/CLAUDE.md`](src/test/CLAUDE.md)
 
+## `twc-agent/` — sibling project, stay out
+
+[`twc-agent/`](twc-agent/) is a self-contained, local-only variant where
+**Claude Code is the input surface** (no in-browser LLM, no API keys,
+state lives as JSON files on disk). The intended workflow is:
+
+```
+cd twc-agent && claude
+```
+
+— so its own `twc-agent/CLAUDE.md`, skill, and slash commands load.
+
+From this (parent) cwd, `twc-agent/` is out of scope:
+
+- **Do not edit files under `twc-agent/`** unless the user explicitly
+  asks you to work on it from the parent root. The expected cwd for
+  `twc-agent/` work is `twc-agent/` itself; entering it from `..` breaks
+  the sandbox property the user relies on.
+- **Do not import from `twc-agent/`** into `src/`, or from `src/` into
+  `twc-agent/`. The two codebases share domain concepts but no code; the
+  subfolder was designed to be extractable.
+- The one place the parent repo touches `twc-agent/` is the root
+  `.gitignore`, which carries a `!twc-agent/.claude/` exception so the
+  subfolder's skill and slash commands remain committed under the
+  parent's blanket `.claude/` ignore.
+
 ## Skills
 
 Repo-local skills in `.claude/skills/`:

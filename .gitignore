@@ -10,3 +10,4 @@ coverage
 claw-code/
 .playwright-mcp/
 .claude/
+!twc-agent/.claude/

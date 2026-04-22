@@ -1,0 +1,11 @@
+node_modules
+dist
+*.tsbuildinfo
+.DS_Store
+
+# Generated
+data/.schema/
+
+# Local-only state (uncomment to keep groups/receipts out of git):
+# data/groups/
+# data/receipts/
