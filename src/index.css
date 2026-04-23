@@ -77,3 +77,13 @@ dialog::backdrop {
   background: rgba(20, 184, 166, 0.35);
   color: var(--color-ink-800);
 }
+
+@keyframes drawer-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes drawer-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}

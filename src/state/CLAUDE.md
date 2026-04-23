@@ -1,10 +1,15 @@
 # src/state/ rules
 
 - **One Zustand store**, persisted via `persist` middleware.
-- **localStorage key stays `twc-v1`.** Bump the numeric `version` (currently `8`) every
+- **localStorage key stays `twc-v1`.** Bump the numeric `version` (currently `9`) every
   time the persisted shape changes; add a `migrate` function in the same commit. Never
   change the storage key — that orphans existing user data. The "v2, v3…" shorthand is
   the persist-version number, not the storage-key name.
+- **`Group.customTransfers?: Transfer[]`** — optional manual override of the greedy
+  settlement plan. `undefined` means "use the auto-computed plan". `setCustomTransfers`
+  writes it, `clearCustomTransfers` drops the key. The v9 migration is additive:
+  existing groups come through with `customTransfers` undefined, which is the intended
+  default; no per-group rewrite runs.
 - **Actions are the only mutation path.** Nothing outside `store.ts` calls `set()`.
   Components read via selectors and call action methods.
 - Selectors returning arrays/objects should use `useShallow` (from

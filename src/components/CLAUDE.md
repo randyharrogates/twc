@@ -26,7 +26,30 @@
   triggered from `ChatPanel` via the `onConsentNeeded` prop; `Shell.tsx` owns the open
   state and calls `grantImageConsent` on confirm.
 - `Nav.tsx` takes an `onOpenSettings` callback — the gear icon opens the settings dialog.
-  ⌘/Ctrl+, is the keyboard shortcut.
+  ⌘/Ctrl+, is the keyboard shortcut. It also takes an `onOpenHelp` callback — the `?`
+  icon (left of the gear) opens `HelpDrawer`. The bare `?` keypress is the keyboard
+  shortcut (ignored while typing into an input / textarea / contentEditable).
+- `HelpDrawer.tsx` is the in-app usage guide. It wraps `ui/Drawer` and renders the
+  Quickstart / Groups / Expenses / Settlement / Chat / Security / Currency sections
+  with a φ-based type scale (42 / 26 / 16 px). `Shell.tsx` owns the open/close state.
+
+## Settlement step
+
+`SettlementSection.tsx` renders three cards in a `grid-cols-1 md:grid-cols-2` grid:
+`BalancesCard`, `TransfersEditor`, and `SettlementSummaryCard` (full-width
+`md:col-span-2` below the first two).
+
+- `TransfersEditor` owns the view/edit UI for transfers. When `group.customTransfers`
+  is undefined it renders the auto-computed greedy plan from `settle(balances)`; when
+  it's an array it renders those verbatim and runs `transferImbalance` against the
+  current `balances` to decide whether to show the red imbalance banner.
+- Edits persist live through `setCustomTransfers(groupId, transfers)` — there is no
+  Save button (matches the rest of the app).
+- If expenses change after manual edits, the memo sets `stale = true` and the yellow
+  staleness banner renders above the editor with Reset-to-auto / Edit actions.
+- `SettlementSummaryCard` reads `lib/summary.formatSettlementSummary(...)` and
+  writes to the clipboard via `navigator.clipboard.writeText`; the button label
+  flips to "Copied" for ~1.5 s.
 
 ## Three-way provider branching — don't two-way this anymore
 

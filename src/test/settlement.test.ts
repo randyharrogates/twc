@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Expense, Group } from '../types';
-import { computeBalances, settle } from '../lib/settlement';
+import type { Expense, Group, Transfer } from '../types';
+import {
+  computeBalances,
+  isBalanced,
+  settle,
+  transferImbalance,
+} from '../lib/settlement';
 import { sumMinor } from '../lib/money';
 
 function makeGroup(overrides: Partial<Group>): Group {
@@ -184,5 +189,67 @@ describe('computeBalances + settle', () => {
     expect(balances.get('alice')).toBe(9990);
     expect(balances.get('bob')).toBe(-4995);
     expect(balances.get('charlie')).toBe(-4995);
+  });
+});
+
+describe('transferImbalance + isBalanced', () => {
+  it('an auto-computed plan from settle() leaves every member at zero', () => {
+    const balances = new Map<string, number>([
+      ['alice', 300],
+      ['bob', -100],
+      ['charlie', -200],
+    ]);
+    const transfers = settle(balances);
+    const imbalance = transferImbalance(balances, transfers);
+    expect(isBalanced(imbalance)).toBe(true);
+    for (const v of imbalance.values()) expect(v).toBe(0);
+  });
+
+  it('detects when an adjusted transfer amount leaves residual imbalance', () => {
+    const balances = new Map<string, number>([
+      ['alice', 300],
+      ['bob', -100],
+      ['charlie', -200],
+    ]);
+    // Bob should pay 100 but only pays 80 → Bob owes 20, Alice is 20 short.
+    const transfers: Transfer[] = [
+      { from: 'bob', to: 'alice', amountMinor: 80 },
+      { from: 'charlie', to: 'alice', amountMinor: 200 },
+    ];
+    const imbalance = transferImbalance(balances, transfers);
+    expect(isBalanced(imbalance)).toBe(false);
+    expect(imbalance.get('alice')).toBe(20);
+    expect(imbalance.get('bob')).toBe(-20);
+    expect(imbalance.get('charlie')).toBe(0);
+  });
+
+  it('a rerouted plan that preserves per-member totals is balanced', () => {
+    // Alice +300, Bob -100, Charlie -200. Re-route Charlie to pay Bob first,
+    // then Bob forwards to Alice — net amounts per member stay the same.
+    const balances = new Map<string, number>([
+      ['alice', 300],
+      ['bob', -100],
+      ['charlie', -200],
+    ]);
+    const transfers: Transfer[] = [
+      { from: 'charlie', to: 'bob', amountMinor: 200 },
+      { from: 'bob', to: 'alice', amountMinor: 300 },
+    ];
+    expect(isBalanced(transferImbalance(balances, transfers))).toBe(true);
+  });
+
+  it('empty balances + empty transfers is balanced', () => {
+    expect(isBalanced(transferImbalance(new Map(), []))).toBe(true);
+  });
+
+  it('includes stray member ids referenced only by transfers (renderable warning)', () => {
+    const balances = new Map<string, number>([['alice', 100], ['bob', -100]]);
+    const transfers: Transfer[] = [
+      { from: 'ghost', to: 'alice', amountMinor: 50 },
+    ];
+    const imbalance = transferImbalance(balances, transfers);
+    expect(imbalance.has('ghost')).toBe(true);
+    expect(imbalance.get('ghost')).toBe(50);
+    expect(isBalanced(imbalance)).toBe(false);
   });
 });

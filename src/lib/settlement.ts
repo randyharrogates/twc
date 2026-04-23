@@ -83,3 +83,38 @@ export function settle(balances: Map<string, number>): Transfer[] {
 
   return transfers;
 }
+
+/**
+ * Net change applied to each member by a set of transfers, in base-currency minor units.
+ * `+X` = member receives X; `-X` = member pays X.
+ *
+ * When subtracted from `balances`, the result is each member's residual: how much they
+ * are still owed (positive) or still owe (negative) after the transfers execute. A
+ * transfer plan is balanced iff every residual is zero. Keys are the union of members
+ * in `balances` and member ids referenced by `transfers` (stray ids show up too, so the
+ * caller can render a warning).
+ */
+export function transferImbalance(
+  balances: Map<string, number>,
+  transfers: Transfer[],
+): Map<string, number> {
+  const imbalance = new Map<string, number>();
+  for (const [id, v] of balances) imbalance.set(id, v);
+  for (const t of transfers) {
+    if (!imbalance.has(t.from)) imbalance.set(t.from, 0);
+    if (!imbalance.has(t.to)) imbalance.set(t.to, 0);
+    imbalance.set(t.from, imbalance.get(t.from)! + t.amountMinor);
+    imbalance.set(t.to, imbalance.get(t.to)! - t.amountMinor);
+  }
+  return imbalance;
+}
+
+/**
+ * True iff every residual is zero — the transfer plan fully settles the balances.
+ */
+export function isBalanced(imbalance: Map<string, number>): boolean {
+  for (const v of imbalance.values()) {
+    if (v !== 0) return false;
+  }
+  return true;
+}

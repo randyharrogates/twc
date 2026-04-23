@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import type { Group } from '../types';
-import { computeBalances, settle } from '../lib/settlement';
+import type { Group, Transfer } from '../types';
+import {
+  computeBalances,
+  isBalanced,
+  settle,
+  transferImbalance,
+} from '../lib/settlement';
 import { CountUp } from './ui/CountUp';
 import { SectionReveal } from './ui/SectionReveal';
+import { TransfersEditor } from './TransfersEditor';
+import { SettlementSummaryCard } from './SettlementSummaryCard';
 
 interface Props {
   group: Group | null;
@@ -30,23 +37,53 @@ export function SettlementSection({ group }: Props) {
   );
 }
 
+interface SettlementModel {
+  balances: Map<string, number>;
+  autoTransfers: Transfer[];
+  effectiveTransfers: Transfer[];
+  stale: boolean;
+  error: string | null;
+}
+
 function SettlementContent({ group }: { group: Group }) {
-  const { balances, transfers, error } = useMemo(() => {
+  const model: SettlementModel = useMemo(() => {
     try {
-      const b = computeBalances(group);
-      const t = settle(b);
-      return { balances: b, transfers: t, error: null as string | null };
+      const balances = computeBalances(group);
+      const autoTransfers = settle(balances);
+      if (group.customTransfers !== undefined) {
+        const stale = !isBalanced(transferImbalance(balances, group.customTransfers));
+        return {
+          balances,
+          autoTransfers,
+          effectiveTransfers: group.customTransfers,
+          stale,
+          error: null,
+        };
+      }
+      return {
+        balances,
+        autoTransfers,
+        effectiveTransfers: autoTransfers,
+        stale: false,
+        error: null,
+      };
     } catch (e) {
       return {
         balances: new Map<string, number>(),
-        transfers: [],
+        autoTransfers: [],
+        effectiveTransfers: [],
+        stale: false,
         error: (e as Error).message,
       };
     }
   }, [group]);
 
   const wasSettled = useRef<boolean>(false);
-  const isSettled = group.expenses.length > 0 && transfers.length === 0 && !error;
+  const isSettled =
+    group.expenses.length > 0 &&
+    model.effectiveTransfers.length === 0 &&
+    !model.error &&
+    !model.stale;
 
   useEffect(() => {
     if (isSettled && !wasSettled.current) {
@@ -61,10 +98,10 @@ function SettlementContent({ group }: { group: Group }) {
     if (!isSettled) wasSettled.current = false;
   }, [isSettled]);
 
-  if (error) {
+  if (model.error) {
     return (
       <div className="rounded-xl border border-red-400/50 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-        {error}
+        {model.error}
       </div>
     );
   }
@@ -77,54 +114,53 @@ function SettlementContent({ group }: { group: Group }) {
     );
   }
 
+  return (
+    <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+      <BalancesCard group={group} balances={model.balances} />
+      <TransfersEditor
+        group={group}
+        balances={model.balances}
+        transfers={model.effectiveTransfers}
+        autoTransfers={model.autoTransfers}
+        stale={model.stale}
+      />
+      <SettlementSummaryCard
+        group={group}
+        balances={model.balances}
+        transfers={model.effectiveTransfers}
+      />
+    </div>
+  );
+}
+
+function BalancesCard({
+  group,
+  balances,
+}: {
+  group: Group;
+  balances: Map<string, number>;
+}) {
   const nameById = new Map(group.members.map((m) => [m.id, m.name]));
   const sortedBalances = [...balances.entries()].sort((a, b) => b[1] - a[1]);
 
   return (
-    <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-      <div>
-        <h3 className="mb-4 font-display text-sm tracking-widest text-ink-500">BALANCES</h3>
-        <ul className="divide-y divide-ink-200/50 rounded-2xl border border-ink-300 bg-ink-100/40">
-          {sortedBalances.map(([id, v]) => (
-            <li key={id} className="flex items-center justify-between px-4 py-3">
-              <span className="text-ink-700">{nameById.get(id) ?? 'Unknown'}</span>
-              <span
-                className={`font-mono text-sm ${
-                  v > 0 ? 'text-accent-400' : v < 0 ? 'text-red-400' : 'text-ink-500'
-                }`}
-              >
-                {v > 0 ? '+' : ''}
-                <CountUp valueMinor={v} currency={group.baseCurrency} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div>
-        <h3 className="mb-4 font-display text-sm tracking-widest text-ink-500">TRANSFERS</h3>
-        {transfers.length === 0 ? (
-          <div className="rounded-2xl border border-accent-500/40 bg-accent-500/5 px-6 py-10 text-center">
-            <p className="font-display text-2xl tracking-wide text-accent-400">ALL SETTLED</p>
-            <p className="mt-2 text-sm text-ink-500">Everyone is square.</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-ink-200/50 rounded-2xl border border-ink-300 bg-ink-100/40">
-            {transfers.map((t, i) => (
-              <li key={i} className="flex items-center justify-between px-4 py-3">
-                <span className="text-ink-700">
-                  <span className="font-medium">{nameById.get(t.from) ?? '?'}</span>
-                  <span className="mx-2 text-accent-400">→</span>
-                  <span className="font-medium">{nameById.get(t.to) ?? '?'}</span>
-                </span>
-                <span className="font-mono text-sm text-ink-800">
-                  <CountUp valueMinor={t.amountMinor} currency={group.baseCurrency} />
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+    <div>
+      <h3 className="mb-4 font-display text-sm tracking-widest text-ink-500">BALANCES</h3>
+      <ul className="divide-y divide-ink-200/50 rounded-2xl border border-ink-300 bg-ink-100/40">
+        {sortedBalances.map(([id, v]) => (
+          <li key={id} className="flex items-center justify-between px-4 py-3">
+            <span className="text-ink-700">{nameById.get(id) ?? 'Unknown'}</span>
+            <span
+              className={`font-mono text-sm ${
+                v > 0 ? 'text-accent-400' : v < 0 ? 'text-red-400' : 'text-ink-500'
+              }`}
+            >
+              {v > 0 ? '+' : ''}
+              <CountUp valueMinor={v} currency={group.baseCurrency} />
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { ExpensesSection } from './ExpensesSection';
 import { SettlementSection } from './SettlementSection';
 import { ChatPanel } from './chat/ChatPanel';
 import { SettingsDialog } from './SettingsDialog';
+import { HelpDrawer } from './HelpDrawer';
 import { ConsentDialog } from './ConsentDialog';
 import { ToolConfirmDialog } from './ToolConfirmDialog';
 import { RateInputDialog } from './RateInputDialog';
@@ -51,6 +52,7 @@ export function Shell() {
   const grantImageConsent = useAppStore((s) => s.grantImageConsent);
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [pendingConsent, setPendingConsent] = useState<PendingConsent | null>(null);
   const [pendingToolConsent, setPendingToolConsent] = useState<PendingToolConsent | null>(null);
   const [pendingRateInput, setPendingRateInput] = useState<PendingRateInput | null>(null);
@@ -92,6 +94,18 @@ export function Shell() {
         e.preventDefault();
         setSettingsOpen(true);
       }
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        const editable =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          (target?.isContentEditable ?? false);
+        if (editable) return;
+        e.preventDefault();
+        setHelpOpen(true);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -100,7 +114,10 @@ export function Shell() {
   return (
     <div className="relative min-h-full">
       <BackgroundLayer />
-      <Nav onOpenSettings={() => setSettingsOpen(true)} />
+      <Nav
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+      />
       <KeyReminderBanner onOpenSettings={() => setSettingsOpen(true)} />
       <main>
         <Hero />
@@ -126,6 +143,7 @@ export function Shell() {
         />
       )}
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <HelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} />
       {pendingConsent && (
         <ConsentDialog
           provider={pendingConsent.provider}

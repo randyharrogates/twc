@@ -27,6 +27,16 @@ export function Plus({ className = 'h-4 w-4' }: IconProps) {
   );
 }
 
+export function QuestionMark({ className = 'h-4 w-4' }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="10" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 9a2.5 2.5 0 115 0c0 1.5-2.5 2-2.5 4" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 17.5v.01" />
+    </svg>
+  );
+}
+
 export function Sparkle({ className = 'h-4 w-4' }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden>

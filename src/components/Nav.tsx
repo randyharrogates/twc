@@ -1,5 +1,5 @@
 import { useActiveSection } from '../hooks/useActiveSection';
-import { Gear } from './ui/icons';
+import { Gear, QuestionMark } from './ui/icons';
 
 const SECTIONS = [
   { id: 'home', label: 'HOME' },
@@ -10,9 +10,10 @@ const SECTIONS = [
 
 interface NavProps {
   onOpenSettings: () => void;
+  onOpenHelp: () => void;
 }
 
-export function Nav({ onOpenSettings }: NavProps) {
+export function Nav({ onOpenSettings, onOpenHelp }: NavProps) {
   const active = useActiveSection(SECTIONS.map((s) => s.id));
 
   const scrollTo = (id: string) => {
@@ -47,6 +48,15 @@ export function Nav({ onOpenSettings }: NavProps) {
               </li>
             ))}
           </ul>
+          <button
+            type="button"
+            onClick={onOpenHelp}
+            aria-label="Open help"
+            title="How to use (?)"
+            className="rounded-full p-1.5 text-ink-600 hover:bg-ink-200 hover:text-ink-800"
+          >
+            <QuestionMark className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={onOpenSettings}

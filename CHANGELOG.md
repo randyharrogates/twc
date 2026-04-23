@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-24
+
+### Added
+
+- **(settlement)** Editable transfers on step three. The greedy `settle()` plan
+  is now an override-able default: users can add, delete, reroute, or manually
+  adjust any transfer via the new
+  [`TransfersEditor.tsx`](src/components/TransfersEditor.tsx) component. A
+  live red imbalance banner lists per-member residuals (e.g. `Alice:
+  +S$10.00 imbalanced`) while the edit is in-flight, and a yellow staleness
+  banner appears if expenses change after manual edits. "Reset to auto" drops
+  the override and re-renders the computed plan.
+- **(settlement)** Shareable plain-text summary card
+  ([`SettlementSummaryCard.tsx`](src/components/SettlementSummaryCard.tsx))
+  — full-width card below the Balances / Transfers columns with a Copy-to-
+  clipboard button. The rendered block includes the group name, base
+  currency, ISO-dated expense list with payer + native-currency amount,
+  balances, and transfers. Format is plain text so it pastes cleanly into
+  WhatsApp, Telegram, Slack, Discord, or SMS.
+- **(ui)** `Drawer` primitive in [`ui/Drawer.tsx`](src/components/ui/Drawer.tsx) —
+  native-`<dialog>` + `showModal()` pinned to the right or left edge. Width is
+  `clamp(320px, 38.2vw, 720px)` (golden-ratio minor portion, full-width on
+  narrow viewports) with slide-in keyframes in
+  [`src/index.css`](src/index.css). Zero domain knowledge; reusable for future
+  drawer-shaped surfaces.
+- **(ui)** `HelpDrawer.tsx` — in-app usage guide (Quickstart, Groups, Expenses,
+  Settlement, Chat Assistant, Security & Vault, Currencies & FX) rendered with
+  a φ-based type scale (42 / 26 / 16 px). Opens from a `?` icon in `Nav` (left
+  of the gear) and from a bare `?` keypress (suppressed while typing into an
+  input, textarea, select, or contentEditable element).
+- **(lib)** Pure `formatSettlementSummary(group, balances, transfers)` in
+  [`src/lib/summary.ts`](src/lib/summary.ts). Deterministic, uses
+  `formatMinor` and `expense.createdAt` — no DOM, no `Date.now()`.
+- **(lib)** Pure settlement helpers `transferImbalance(balances, transfers)`
+  and `isBalanced(imbalance)` in
+  [`src/lib/settlement.ts`](src/lib/settlement.ts) — used by
+  `TransfersEditor` to decide between the balanced / imbalanced / stale
+  render paths. `settle()` and `computeBalances()` are unchanged; the new
+  helpers validate user edits, they don't replace the greedy planner.
+- **(state)** `Group.customTransfers?: Transfer[]` optional override on
+  [`src/types.ts`](src/types.ts) and `setCustomTransfers` /
+  `clearCustomTransfers` actions on
+  [`src/state/store.ts`](src/state/store.ts). `undefined` means "use the
+  auto-computed plan"; the render path falls back automatically.
+
+### Changed
+
+- **(state)** Persist version bump v8→v9. Migration is additive — existing
+  groups come through with `customTransfers` undefined, which is the
+  intended default, so no per-group rewrite runs and no user data is
+  touched. Storage key stays `twc-v1`.
+- **(settlement)** `SettlementSection.tsx` split into `BalancesCard`,
+  `TransfersEditor`, and `SettlementSummaryCard`. Layout changed from a
+  two-column grid to two columns + a full-width summary row
+  (`md:col-span-2`) so the copy-paste block has breathing room on wider
+  viewports.
+- **(ui)** `Nav.tsx` gains an `onOpenHelp` callback and a `?` icon rendered
+  to the left of the gear; `Shell.tsx` owns the drawer state and registers
+  the `?` keyboard shortcut alongside the existing ⌘/Ctrl+K and ⌘/Ctrl+,
+  bindings.
+- **(docs)** CLAUDE.md updates in `src/components/`, `src/components/ui/`,
+  and `src/state/` describing the new settlement surface, the Drawer
+  primitive, and the v9 persist shape.
+
 ## [0.3.0] - 2026-04-22
 
 ### Added

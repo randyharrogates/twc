@@ -7,6 +7,7 @@ import type {
   Group,
   SplitEntry,
   SplitMode,
+  Transfer,
 } from '../types';
 import { newId } from '../lib/id';
 import type {
@@ -112,6 +113,9 @@ export interface AppState {
   addExpense: (groupId: string, input: ExpenseInput) => string;
   updateExpense: (groupId: string, expenseId: string, input: ExpenseInput) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
+
+  setCustomTransfers: (groupId: string, transfers: Transfer[]) => void;
+  clearCustomTransfers: (groupId: string) => void;
 
   setLLMProvider: (provider: Provider) => void;
   setApiKey: (provider: Provider, key: string) => Promise<void>;
@@ -415,6 +419,29 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      setCustomTransfers: (groupId, transfers) => {
+        const group = get().groups[groupId];
+        if (!group) return;
+        set((s) => ({
+          groups: {
+            ...s.groups,
+            [groupId]: { ...group, customTransfers: transfers.map((t) => ({ ...t })) },
+          },
+        }));
+      },
+
+      clearCustomTransfers: (groupId) => {
+        const group = get().groups[groupId];
+        if (!group) return;
+        if (group.customTransfers === undefined) return;
+        set((s) => {
+          const { customTransfers: _drop, ...rest } = group;
+          return {
+            groups: { ...s.groups, [groupId]: rest },
+          };
+        });
+      },
+
       setLLMProvider: (provider) =>
         set((s) => ({ settings: { ...s.settings, llmProvider: provider } })),
 
@@ -704,7 +731,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'twc-v1',
-      version: 8,
+      version: 9,
       partialize: (s) => ({
         groups: s.groups,
         groupOrder: s.groupOrder,
@@ -796,6 +823,8 @@ export const useAppStore = create<AppState>()(
         // v6 adds optional elapsedMs / sentInPlanMode on ChatMessage — additive, no transform.
         // v7 adds settings.vault = null (passphrase vault meta) — additive.
         // v8 adds settings.localModel + policy.imageConsentByProvider.local — additive.
+        // v9 adds Group.customTransfers?: Transfer[] — additive; undefined is the intended default.
+        if (fromVersion >= 9) return base as AppState;
         if (fromVersion >= 8) return base as AppState;
         if (fromVersion >= 7) return withV8(base) as AppState;
         if (fromVersion >= 6) return withV8(withV7(base)) as AppState;

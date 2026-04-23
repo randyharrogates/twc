@@ -34,6 +34,7 @@ export interface Group {
   members: Member[];
   expenses: Expense[];
   rateHints: Partial<Record<CurrencyCode, number>>;
+  customTransfers?: Transfer[];
 }
 
 export interface Transfer {
